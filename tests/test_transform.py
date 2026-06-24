@@ -84,7 +84,13 @@ def test_merge_dataframes():
 
 
 def test_add_column(sample_df):
-    # add_column evaluates `df.<expression>`, so column refs must be attribute
-    # or bracket access on df (e.g. "A + df.C"), not bare names.
-    out = add_column(sample_df.copy(), "D", "A + df.C")
+    # df.eval uses bare column names: "A + C", not "A + df.C".
+    out = add_column(sample_df.copy(), "D", "A + C")
     assert list(out["D"]) == [11, 22, 33, 44, 55]
+
+
+def test_add_column_rejects_arbitrary_code(sample_df):
+    # Security regression guard: add_column must NOT execute arbitrary Python.
+    # df.eval rejects anything that isn't a column expression.
+    with pytest.raises(Exception):
+        add_column(sample_df.copy(), "evil", '__import__("os").getcwd()')

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Callable, Dict, List, Union
 
-def filter_rows(df: pd.DataFrame, column: str, operator: str, value: Union[int, float, str]) -> pd.DataFrame:
+def filter_rows(df, column, operator, value):
     if operator == 'eq':
         return df[df[column] == value]
     elif operator == 'ne':
@@ -24,24 +24,28 @@ def filter_rows(df: pd.DataFrame, column: str, operator: str, value: Union[int, 
     else:
         raise ValueError("Invalid operator")
 
-def select_columns(df: pd.DataFrame, columns: List[str]) -> pd.DataFrame:
+def select_columns(df, columns):
     return df[columns]
 
-def rename_columns(df: pd.DataFrame, mapping: Dict[str, str]) -> pd.DataFrame:
+def rename_columns(df, mapping):
     return df.rename(columns=mapping)
 
-def sort_rows(df: pd.DataFrame, columns: List[str], ascending: bool = True) -> pd.DataFrame:
+def sort_rows(df, columns, ascending=True):
     return df.sort_values(by=columns, ascending=ascending)
 
-def group_and_aggregate(df: pd.DataFrame, group_by: List[str], aggregations: Dict[str, Callable]) -> pd.DataFrame:
+def group_and_aggregate(df, group_by, aggregations):
     return df.groupby(group_by).agg(aggregations)
 
-def pivot(df: pd.DataFrame, index: str, columns: str, values: str, aggfunc: str = 'mean') -> pd.DataFrame:
+def pivot(df, index, columns, values, aggfunc='mean'):
     return df.pivot_table(index=index, columns=columns, values=values, aggfunc=aggfunc)
 
-def merge_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, on: str, how: str = 'inner') -> pd.DataFrame:
+def merge_dataframes(df1, df2, on, how='inner'):
     return pd.merge(df1, df2, on=on, how=how)
 
-def add_column(df: pd.DataFrame, column_name: str, expression: str) -> pd.DataFrame:
-    df[column_name] = eval('df.' + expression)
+def add_column(df, column_name, expression):
+    # Use pandas' sandboxed expression evaluator rather than the builtin eval().
+    # df.eval understands column arithmetic (e.g. "A + C", "price * 1.2") but
+    # cannot import modules or run arbitrary Python, so it is safe to expose to
+    # API callers. Column names are referenced bare: "A + C", not "A + df.C".
+    df[column_name] = df.eval(expression)
     return df
