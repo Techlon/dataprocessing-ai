@@ -30,6 +30,25 @@ app.add_middleware(
 def df_to_json(df):
     return json.loads(df.where(df.notna(), other=None).to_json(orient="records"))
 
+def to_native(obj):
+    """Recursively convert numpy scalars/arrays to JSON-serialisable Python types.
+
+    full_report() returns dicts containing numpy int64/float64 values and numpy
+    arrays, which FastAPI's encoder cannot serialise. This normalises them.
+    """
+    import numpy as np
+    if isinstance(obj, dict):
+        return {to_native(k): to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_native(v) for v in obj]
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return [to_native(v) for v in obj.tolist()]
+    if isinstance(obj, float) and (obj != obj):  # NaN -> null
+        return None
+    return obj
+
 class CleanRequest(BaseModel):
     data: List[Dict[str, Any]]
     drop_null_threshold: float = 0.5
@@ -105,6 +124,6 @@ def transform(req: TransformRequest):
 def analyse(req: AnalyseRequest):
     try:
         df = pd.DataFrame(req.data)
-        return full_report(df)
+        return to_native(full_report(df))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
