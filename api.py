@@ -18,6 +18,10 @@ from dataprocessing.transform import (
 )
 from dataprocessing.analyse import full_report
 
+from dataprocessing.visualise import (
+    histogram, bar_chart, scatter, line_chart, correlation_heatmap
+)
+
 app = FastAPI(title="DataProcessing API", version="0.1.0")
 
 app.add_middleware(
@@ -127,3 +131,32 @@ def analyse(req: AnalyseRequest):
         return to_native(full_report(df))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+        
+class VisualiseRequest(BaseModel):
+    data: List[Dict[str, Any]]
+    chart: str
+    params: Dict[str, Any] = {}
+
+@app.post("/visualise")
+def visualise(req: VisualiseRequest):
+    try:
+        df = pd.DataFrame(req.data)
+        charts = {
+            "histogram": histogram,
+            "bar_chart": bar_chart,
+            "scatter": scatter,
+            "line_chart": line_chart,
+            "correlation_heatmap": correlation_heatmap,
+        }
+        if req.chart not in charts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown chart: {req.chart}. Valid: {list(charts.keys())}",
+            )
+        result = charts[req.chart](df, **req.params)
+        return to_native(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # bad/missing/non-numeric column raises ValueError -> client error
+        raise HTTPException(status_code=400, detail=str(e))

@@ -17,6 +17,9 @@ from dataprocessing.transform import (
 )
 from dataprocessing.analyse import full_report
 
+from dataprocessing.visualise import (
+    histogram, bar_chart, scatter, line_chart, correlation_heatmap)
+
 mcp = FastMCP("DataProcessing")
 
 def df_to_json(df: pd.DataFrame) -> List[Dict]:
@@ -119,6 +122,38 @@ def analyse_data(data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     df = pd.DataFrame(data)
     return full_report(df)
+
+@mcp.tool()
+def visualise_data(data: List[Dict[str, Any]], chart: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Visualize data in various charts based on the provided type and parameters.
+
+    Args:
+        data (List[Dict[str, Any]]): List of row dicts representing the dataset.
+        chart (str): The type of chart to generate ('histogram', 'bar_chart', 'scatter', 'line_chart', or 'correlation_heatmap').
+        params (Dict[str, Any]): Parameters specific to each chart type:
+            - histogram: {'column': str, 'bins': int}
+            - bar_chart: {'column': str}
+            - scatter: {'x': str, 'y': str}
+            - line_chart: {'x': str, 'y': str}
+            - correlation_heatmap: {'columns': List[str] (optional)}
+
+    Returns:
+        Dict[str, Any]: A JSON-serializable Vega-Lite spec dict representing the chart.
+    """
+    df = pd.DataFrame(data)
+    charts = {
+        "histogram": histogram,
+        "bar_chart": bar_chart,
+        "scatter": scatter,
+        "line_chart": line_chart,
+        "correlation_heatmap": correlation_heatmap
+    }
+
+    if chart not in charts:
+        raise ValueError(f"Unknown chart: {chart}. Valid: {list(charts.keys())}")
+
+    return charts[chart](df, **params)
 
 if __name__ == "__main__":
     mcp.run()

@@ -73,7 +73,6 @@ def test_transform_unknown_operation():
     response = client.post("/transform", json=payload)
     assert response.status_code == 400
 
-
 def test_analyse_returns_report():
     # full_report output is now passed through to_native(), so numpy types are
     # serialised and a mixed numeric/string payload returns valid JSON.
@@ -89,3 +88,58 @@ def test_analyse_returns_report():
     data = response.json()
     assert isinstance(data, dict)
     assert "summary_stats" in data
+
+def test_visualise_histogram():
+    payload = {"data": [{"col1": 1}, {"col1": 2}, {"col1": 3}], "chart": "histogram", "params": {"column": "col1"}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 200
+    vega_lite_spec = response.json()
+    assert "mark" in vega_lite_spec
+    assert "data" in vega_lite_spec
+    data = vega_lite_spec["data"]
+    assert "values" in data
+    assert isinstance(data["values"], list)
+
+def test_visualise_bar_chart():
+    payload = {"data": [{"col1": "val1"}, {"col1": "val2"}, {"col1": "val3"}], "chart": "bar_chart", "params": {"column": "col1"}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 200
+    vega_lite_spec = response.json()
+    assert "mark" in vega_lite_spec
+    assert "data" in vega_lite_spec
+    data = vega_lite_spec["data"]
+    assert "values" in data
+    assert isinstance(data["values"], list)
+
+def test_visualise_scatter():
+    payload = {"data": [{"col1": 1, "col2": 2}, {"col1": 3, "col2": 4}], "chart": "scatter", "params": {"x": "col1", "y": "col2"}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 200
+    vega_lite_spec = response.json()
+    assert "mark" in vega_lite_spec
+    assert "data" in vega_lite_spec
+    data = vega_lite_spec["data"]
+    assert "values" in data
+    assert isinstance(data["values"], list)
+
+def test_visualise_correlation_heatmap():
+    payload = {"data": [{"col1": 1, "col2": 2}, {"col1": 3, "col2": 4}], "chart": "correlation_heatmap", "params": {"columns": ["col1", "col2"]}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 200
+    vega_lite_spec = response.json()
+    assert "mark" in vega_lite_spec
+    assert "data" in vega_lite_spec
+    data = vega_lite_spec["data"]
+    assert "values" in data
+    assert isinstance(data["values"], list)
+    assert len(data["values"]) > 0
+
+def test_visualise_unknown_chart():
+    payload = {"data": [{"col1": 1}, {"col1": 2}], "chart": "piechart", "params": {}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 400
+
+def test_visualise_bad_column():
+    payload = {"data": [{"col1": "val1"}, {"col1": "val2"}], "chart": "histogram", "params": {"column": "col1"}}
+    response = client.post("/visualise", json=payload)
+    assert response.status_code == 400
