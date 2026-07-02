@@ -101,13 +101,48 @@ spec dict that any Vega-Lite renderer can display.
 A bad chart name, a missing column, or a non-numeric column where a numeric one
 is required returns HTTP 400 (or raises `ValueError` when called directly).
 
+### Example response
+
+A call with `{"chart": "histogram", "params": {"column": "age", "bins": 3}}`
+returns a Vega-Lite spec like:
+
+```json
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Histogram of age",
+  "data": {
+    "values": [
+      {"bin_start": 23.0, "bin_end": 29.33, "count": 4},
+      {"bin_start": 29.33, "bin_end": 35.67, "count": 3},
+      {"bin_start": 35.67, "bin_end": 42.0, "count": 1}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "bin_start", "type": "quantitative"},
+    "x2": {"field": "bin_end", "type": "quantitative"},
+    "y": {"field": "count", "type": "quantitative"}
+  }
+}
+```
+
+Paste the returned spec into the [Vega-Lite editor](https://vega.github.io/editor/)
+or render it with any Vega-Lite-compatible frontend.
+
 ## MCP Tools
 
 The MCP server exposes each capability as a Claude-native tool:
-`ingest_file`, `clean_data`, `transform_data`, `analyse_data`, and
-`visualise_data`. The `visualise_data` tool takes `data`, `chart`, and `params`
-(the same chart names and params as the table above) and returns a Vega-Lite
-spec dict.
+
+| Tool | Arguments | Description |
+|------|-----------|-------------|
+| `ingest_file` | `file_path` | Read a data file (CSV, JSON, Excel, Parquet) from disk |
+| `clean_data` | `data`, `drop_null_threshold`, `remove_dupes`, `standardise_cols` | Remove nulls, duplicates, and standardise column names |
+| `transform_data` | `data`, `operation`, `params` | Apply a named transform (filter, select, rename, sort, group, add column) |
+| `analyse_data` | `data` | Full statistical report (summary, correlations, missing, outliers) |
+| `visualise_data` | `data`, `chart`, `params` | Produce a Vega-Lite chart spec (see [Charts](#charts) for names and params) |
+
+The `visualise_data` tool uses the same chart names and params as the `/visualise`
+endpoint and returns a Vega-Lite spec dict.
 
 ## Supported formats
 CSV, JSON, Excel (.xlsx), Parquet
