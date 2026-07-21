@@ -14,3 +14,12 @@ build/
 .vscode/
 .idea/
 *.log
+
+# Generation workspace scratch files
+*_brief.md
+*_snippet.py
+api_generated.py
+*.bak
+
+# Separate project — not part of this library
+company-agents/

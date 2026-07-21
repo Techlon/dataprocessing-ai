@@ -155,5 +155,10 @@ def visualise_data(data: List[Dict[str, Any]], chart: str, params: Dict[str, Any
 
     return charts[chart](df, **params)
 
-if __name__ == "__main__":
+def main():
     mcp.run()
+
+if __name__ == "__main__":
+    main()
+    
+    

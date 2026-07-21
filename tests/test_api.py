@@ -2,7 +2,7 @@ import io
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-from api import app
+from dataprocessing.api import app
 
 client = TestClient(app)
 

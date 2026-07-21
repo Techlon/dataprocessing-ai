@@ -15,9 +15,10 @@ Built to be called by any AI agent via REST API, MCP server, or direct Python im
 
 ### 1. REST API (any AI, any language)
 
-Start the server:
+Install with the API extra, then start the server:
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
+pip install "dataprocessing-ai[api]"
+uvicorn dataprocessing.api:app --host 0.0.0.0 --port 8000
 ```
 
 Call it:
@@ -31,18 +32,24 @@ curl -X POST http://localhost:8000/visualise -H "Content-Type: application/json"
 
 ### 2. MCP Server (Claude native tools)
 
-Add to your claude_desktop_config.json:
+Install with the MCP extra:
+```bash
+pip install "dataprocessing-ai[mcp]"
+```
+
+Then add to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "dataprocessing": {
-      "command": "python3",
-      "args": ["/path/to/datalib/mcp_server.py"],
-      "env": {"PYTHONPATH": "/path/to/datalib"}
+      "command": "dataprocessing-mcp"
     }
   }
 }
 ```
+
+No paths, no `PYTHONPATH` — the installed package provides the
+`dataprocessing-mcp` command directly.
 
 ### 3. Python package (direct import)
 
@@ -65,12 +72,29 @@ heatmap_spec = correlation_heatmap(df)
 ## Installation
 
 ```bash
+pip install dataprocessing-ai
+```
+
+That gives you the core library (`ingest`, `clean`, `transform`, `analyse`,
+`visualise`) with a minimal dependency footprint.
+
+Optional extras add the interfaces and file formats you need:
+
+```bash
+pip install "dataprocessing-ai[mcp]"      # MCP server (for Claude and other agents)
+pip install "dataprocessing-ai[api]"      # REST API server
+pip install "dataprocessing-ai[formats]"  # Excel (.xlsx) and Parquet support
+pip install "dataprocessing-ai[all]"      # everything
+```
+
+### Installing from source
+
+```bash
 git clone https://github.com/Techlon/dataprocessing-ai.git
 cd dataprocessing-ai
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ## API Endpoints

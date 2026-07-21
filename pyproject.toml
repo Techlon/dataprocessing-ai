@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dataprocessing"
+name = "dataprocessing-ai"
 version = "0.1.0"
 description = "AI-native data processing library — REST API, MCP server, and Python package"
 readme = "README.md"
@@ -18,24 +18,43 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
+
 dependencies = [
-  "fastapi>=0.110.0",
-  "uvicorn>=0.27.0",
-  "pandas>=2.2.0",
-  "numpy>=1.26.0",
-  "openpyxl>=3.1.0",
-  "pyarrow>=15.0.0",
-  "python-multipart>=0.0.9",
-  "pydantic>=2.6.0",
-  "mcp>=0.9.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-  "pytest>=8.0.0",
-  "httpx>=0.27.0",
-  "pytest-asyncio>=0.23.0",
+api = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "pydantic>=2.6.0",
+    "python-multipart>=0.0.9",
 ]
+mcp = [
+    "mcp>=0.9.0",
+]
+formats = [
+    "openpyxl>=3.1.0",
+    "pyarrow>=15.0.0",
+]
+all = [
+    "dataprocessing-ai[api,mcp,formats]",
+]
+dev = [
+    "dataprocessing-ai[all]",
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Techlon/dataprocessing-ai"
+Repository = "https://github.com/Techlon/dataprocessing-ai"
+Issues = "https://github.com/Techlon/dataprocessing-ai/issues"
+
+[project.scripts]
+dataprocessing-mcp = "dataprocessing.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
