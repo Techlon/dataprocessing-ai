@@ -12,6 +12,7 @@ import io
 import json
 
 from dataprocessing import __version__
+from dataprocessing._defaults import DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.clean import (
     drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
@@ -38,8 +39,11 @@ app.add_middleware(
 
 class CleanRequest(BaseModel):
     data: List[Dict[str, Any]]
-    drop_null_threshold: float = 0.5
+    drop_null_threshold: float = DEFAULT_NULL_THRESHOLD
     remove_outliers: bool = False
+    # The multiplier on the IQR that sets the outlier fence. Only consulted
+    # when remove_outliers is true; 3.0 removes fewer rows than the 1.5 default.
+    outlier_factor: float = DEFAULT_IQR_FACTOR
 
 class TransformRequest(BaseModel):
     data: List[Dict[str, Any]]
@@ -110,7 +114,7 @@ def clean(req: CleanRequest):
         # The request model has always offered this flag; it was declared and
         # then ignored, so callers asking for outlier removal silently got none.
         if req.remove_outliers:
-            df = remove_outliers_iqr(df)
+            df = remove_outliers_iqr(df, factor=req.outlier_factor)
         df = standardise_columns(df)
         return {
             "data": df_to_json(df),

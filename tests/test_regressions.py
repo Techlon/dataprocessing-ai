@@ -767,3 +767,92 @@ def test_threshold_outside_zero_to_one_raises(bad):
     df = pd.DataFrame({"a": ["x"]})
     with pytest.raises(ValueError, match="between 0 and 1"):
         fix_types(df, threshold=bad)
+
+
+# ===========================================================================
+# The IQR outlier fence is reachable, and shared between the two modules
+# ===========================================================================
+
+# 18.0 lands between the two fences: outside the conventional 1.5 fence, inside
+# the 3.0 "far out" one. That gap is what makes the factor observable. All
+# values are distinct so that clean_all's dedupe step does not confuse the count.
+ONE_MILD_OUTLIER = [10.0, 11.0, 12.0, 13.0, 14.0, 18.0]
+
+
+def test_default_iqr_factor_is_one_point_five():
+    from dataprocessing._defaults import DEFAULT_IQR_FACTOR
+
+    assert DEFAULT_IQR_FACTOR == 1.5
+
+
+def test_clean_and_analyse_share_one_fence():
+    # The same number lived in both modules. What analyse reports as an outlier
+    # must be what clean would drop, or the two disagree as they drift.
+    from dataprocessing.analyse import detect_outliers as detect
+
+    df = pd.DataFrame({"v": ONE_MILD_OUTLIER})
+    flagged = detect(df)["v"]
+    kept = remove_outliers(df)
+    assert flagged == [5]
+    assert len(kept) == len(df) - len(flagged)
+
+
+def test_remove_outliers_factor_widens_the_fence():
+    df = pd.DataFrame({"v": ONE_MILD_OUTLIER})
+    assert len(remove_outliers(df)) == 5                    # 1.5 drops it
+    assert len(remove_outliers(df, factor=3.0)) == 6        # 3.0 keeps it
+
+
+def test_detect_outliers_factor_widens_the_fence():
+    from dataprocessing.analyse import detect_outliers as detect
+
+    df = pd.DataFrame({"v": ONE_MILD_OUTLIER})
+    assert detect(df)["v"] == [5]
+    assert detect(df, factor=3.0)["v"] == []
+
+
+def test_clean_all_passes_the_outlier_factor_through():
+    df = pd.DataFrame({"v": ONE_MILD_OUTLIER})
+    assert len(clean_all(df)) == 5
+    assert len(clean_all(df, outlier_factor=3.0)) == 6
+
+
+@pytest.mark.parametrize("bad", [0, -1.5])
+def test_non_positive_iqr_factor_raises(bad):
+    from dataprocessing.analyse import detect_outliers as detect
+
+    df = pd.DataFrame({"v": ONE_MILD_OUTLIER})
+    with pytest.raises(ValueError, match="greater than 0"):
+        remove_outliers(df, factor=bad)
+    with pytest.raises(ValueError, match="greater than 0"):
+        detect(df, factor=bad)
+
+
+def test_drop_nulls_validates_its_threshold():
+    # Was unvalidated: a threshold of 50 (meaning 50%) silently kept every
+    # column, since no column can be more than 5000% null.
+    df = pd.DataFrame({"a": [1.0, None]})
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        drop_nulls(df, threshold=50)
+
+
+def test_clean_endpoint_accepts_outlier_factor():
+    rows = [{"v": v} for v in ONE_MILD_OUTLIER]
+    tight = client.post("/clean", json={"data": rows, "remove_outliers": True}).json()
+    wide = client.post("/clean", json={
+        "data": rows, "remove_outliers": True, "outlier_factor": 3.0,
+    }).json()
+    assert tight["rows"] == 5 and wide["rows"] == 6
+    assert tight["rows_in"] == 6
+
+
+async def test_mcp_clean_data_accepts_outlier_factor():
+    from dataprocessing import mcp_server
+
+    rows = [{"v": v} for v in ONE_MILD_OUTLIER]
+    tight = await mcp_server.mcp.call_tool(
+        "clean_data", {"data": rows, "remove_outlier_rows": True})
+    wide = await mcp_server.mcp.call_tool(
+        "clean_data", {"data": rows, "remove_outlier_rows": True, "outlier_factor": 3.0})
+    assert tight[1]["result"]["rows"] == 5
+    assert wide[1]["result"]["rows"] == 6

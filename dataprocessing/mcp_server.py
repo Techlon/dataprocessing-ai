@@ -9,6 +9,7 @@ import json
 import io
 import base64
 
+from dataprocessing._defaults import DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.ingest import read_file
 from dataprocessing.clean import (
@@ -45,10 +46,11 @@ def ingest_file(file_path: str) -> Dict[str, Any]:
 @mcp.tool()
 def clean_data(
     data: List[Dict[str, Any]],
-    drop_null_threshold: float = 0.5,
+    drop_null_threshold: float = DEFAULT_NULL_THRESHOLD,
     remove_dupes: bool = True,
     standardise_cols: bool = True,
-    remove_outlier_rows: bool = False
+    remove_outlier_rows: bool = False,
+    outlier_factor: float = DEFAULT_IQR_FACTOR
 ) -> Dict[str, Any]:
     """
     Clean a dataset by removing nulls, duplicates and standardising column names.
@@ -58,6 +60,9 @@ def clean_data(
         remove_dupes: Whether to remove duplicate rows
         standardise_cols: Whether to lowercase and underscore column names
         remove_outlier_rows: Whether to drop rows holding an IQR outlier
+        outlier_factor: Multiplier on the interquartile range that sets the
+                        outlier fence, used only when remove_outlier_rows is
+                        true. 1.5 is conventional; 3.0 removes fewer rows
     Returns:
         Dict with keys: data (cleaned records), rows, columns, rows_in,
         columns_in. Compare rows against rows_in: cleaning drops every row
@@ -71,7 +76,7 @@ def clean_data(
         df = remove_duplicates(df)
     # Parity with the REST /clean endpoint, which offers the same option.
     if remove_outlier_rows:
-        df = remove_outliers_iqr(df)
+        df = remove_outliers_iqr(df, factor=outlier_factor)
     if standardise_cols:
         df = standardise_columns(df)
     return {

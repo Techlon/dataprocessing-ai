@@ -160,6 +160,21 @@ clean_all(df, type_threshold=0.7)         # same dial, from the top level
 Values that fail an accepted conversion become null, so a lower threshold trades
 data for usable types.
 
+**The outlier fence is adjustable too.** Outliers are found with Tukey's rule —
+anything beyond 1.5 × the interquartile range from the quartiles. Raising the
+multiplier flags less (3.0 marks only "far out" points), lowering it flags more.
+`analyse.detect_outliers` and `clean.remove_outliers` share the default, so what
+the analysis reports is what the cleaning would drop:
+
+```python
+detect_outliers(df, factor=3.0)                  # report only extreme points
+remove_outliers(df, factor=3.0)                  # drop only those rows
+clean_all(df, outlier_factor=3.0)                # same dial, from the top level
+```
+
+Over HTTP and MCP the same control is `outlier_factor` on `/clean` and
+`clean_data`, alongside the existing flag that turns outlier removal on.
+
 **Functions return new frames.** No function in `clean` or `transform` modifies
 the DataFrame you pass it.
 

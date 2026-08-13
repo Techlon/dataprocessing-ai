@@ -129,8 +129,18 @@ volume of corrected behaviour is substantive.
   and on `clean_all` (as `type_threshold`), exported as
   `DEFAULT_TYPE_THRESHOLD`, and validated: a value outside 0–1 raises rather
   than silently doing nothing, since passing `90` for 90% is the obvious slip.
+- **The outlier fence is adjustable, and defined once.** The `1.5 × IQR`
+  multiplier was written into both `clean.remove_outliers` and
+  `analyse.detect_outliers`, so the two could drift apart and disagree about
+  what an outlier is — the same duplication that let `/health` report the wrong
+  version. It is now `DEFAULT_IQR_FACTOR` in `dataprocessing/_defaults.py`,
+  shared by both, and a `factor` argument on each. `clean_all` passes it through
+  as `outlier_factor`, and `/clean` and the MCP `clean_data` tool accept it too.
+  A non-positive factor raises.
 - **`clean_all` also exposes `null_threshold`**, which was previously fixed at
   0.5 for anyone using the pipeline rather than calling `drop_nulls` directly.
+  `drop_nulls` now validates it: a threshold of `50`, meaning 50%, silently kept
+  every column, because no column can be 5000% null.
 - **`clean_all` takes `remove_outlier_rows`** (default `True`, unchanged).
   Dropping outliers is a judgement rather than a repair — the extreme value is
   sometimes the observation that matters — so it is now possible to decline it
@@ -181,7 +191,7 @@ volume of corrected behaviour is substantive.
 
 ### Tests
 
-62 → 153. The new tests are regressions for the above, plus coverage of the two
+62 → 163. The new tests are regressions for the above, plus coverage of the two
 merge interfaces; two existing tests were corrected where they asserted the old
 wrong behaviour.
 

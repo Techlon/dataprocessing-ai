@@ -4,27 +4,20 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 
+from dataprocessing._defaults import (
+    DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_TYPE_THRESHOLD,
+    check_positive, check_share,
+)
 
-def drop_nulls(df, threshold=0.5):
+
+def drop_nulls(df, threshold=DEFAULT_NULL_THRESHOLD):
     """Drop columns whose null share exceeds `threshold`, then drop null rows.
 
     Returns a new frame; the caller's DataFrame is left untouched.
     """
+    check_share(threshold)
     cols_to_drop = df.columns[df.isnull().mean() > threshold]
     return df.drop(columns=cols_to_drop).dropna()
-
-
-DEFAULT_TYPE_THRESHOLD = 0.9
-"""Share of a column's non-null values that must convert for the conversion to
-be accepted. 0.9 suits most data; see `fix_types` for when to change it."""
-
-
-def _check_threshold(threshold):
-    if not 0 <= threshold <= 1:
-        raise ValueError(
-            f"threshold must be between 0 and 1, got {threshold!r}. "
-            "It is a share of non-null values, not a percentage."
-        )
 
 
 def _try_convert(series, threshold=DEFAULT_TYPE_THRESHOLD):
@@ -35,7 +28,7 @@ def _try_convert(series, threshold=DEFAULT_TYPE_THRESHOLD):
     ordinary text column — names, cities, product codes — entirely into NaT and
     destroys the data silently. The guard is what makes a speculative parse safe.
     """
-    _check_threshold(threshold)
+    check_share(threshold)
     non_null = int(series.notna().sum())
     if non_null == 0:
         return None
@@ -79,7 +72,7 @@ def fix_types(df, threshold=DEFAULT_TYPE_THRESHOLD):
     Values that fail the accepted conversion become null, so a lower threshold
     trades data for usable types. That is the trade-off the number controls.
     """
-    _check_threshold(threshold)
+    check_share(threshold)
     df = df.copy()
     for col in df.columns:
         # Check bool BEFORE numeric: pandas treats bool as a numeric dtype, so
@@ -101,10 +94,17 @@ def remove_duplicates(df, subset=None):
     return df.drop_duplicates(subset=subset)
 
 
-def remove_outliers(df, columns=None, method='iqr'):
-    """Drop rows holding an IQR outlier in any of the given numeric columns."""
+def remove_outliers(df, columns=None, method='iqr', factor=DEFAULT_IQR_FACTOR):
+    """Drop rows holding an IQR outlier in any of the given numeric columns.
+
+    `factor` is the multiplier on the interquartile range that sets the fence.
+    1.5 is Tukey's convention; 3.0 marks only 'far out' points and so removes
+    fewer rows. Because this drops whole rows, widening the fence is the
+    conservative choice when the extreme values might be real observations.
+    """
     if method != 'iqr':
         raise ValueError(f"Unknown method: {method!r}. Only 'iqr' is supported.")
+    check_positive(factor)
 
     if columns is None:
         numeric_df = df.select_dtypes(include=[np.number])
@@ -123,8 +123,8 @@ def remove_outliers(df, columns=None, method='iqr'):
     Q1 = numeric_df.quantile(0.25)
     Q3 = numeric_df.quantile(0.75)
     IQR = Q3 - Q1
-    lower = Q1 - 1.5 * IQR
-    upper = Q3 + 1.5 * IQR
+    lower = Q1 - factor * IQR
+    upper = Q3 + factor * IQR
     return df[~((numeric_df < lower) | (numeric_df > upper)).any(axis=1)]
 
 
@@ -139,8 +139,9 @@ def standardise_columns(df):
     return df
 
 
-def clean_all(df, remove_outlier_rows=True, null_threshold=0.5,
-              type_threshold=DEFAULT_TYPE_THRESHOLD):
+def clean_all(df, remove_outlier_rows=True, null_threshold=DEFAULT_NULL_THRESHOLD,
+              type_threshold=DEFAULT_TYPE_THRESHOLD,
+              outlier_factor=DEFAULT_IQR_FACTOR):
     """Run the full cleaning pipeline.
 
     Note that this is lossy by design, and more so than it looks: `drop_nulls`
@@ -153,15 +154,22 @@ def clean_all(df, remove_outlier_rows=True, null_threshold=0.5,
     not a repair: the extreme value is sometimes the observation that matters.
     It defaults to True to preserve the behaviour of earlier releases.
 
-    The two thresholds are named separately because they govern different steps:
-    `null_threshold` is the share of nulls above which a column is dropped, and
-    `type_threshold` is the share of values that must convert before a column's
-    type is changed (see `fix_types`). Both keep their previous defaults.
+    Each step's judgement value is named separately, because they govern
+    different things and a single `threshold` argument would be ambiguous:
+
+    - `null_threshold` — share of nulls above which a column is dropped (0.5)
+    - `type_threshold` — share of values that must convert before a column's
+      type is changed, see `fix_types` (0.9)
+    - `outlier_factor` — multiplier on the IQR that sets the outlier fence,
+      see `remove_outliers` (1.5)
+
+    All keep the defaults of earlier releases, so calling `clean_all(df)`
+    behaves exactly as before.
     """
     df = drop_nulls(df, threshold=null_threshold)
     df = fix_types(df, threshold=type_threshold)
     df = remove_duplicates(df)
     if remove_outlier_rows:
-        df = remove_outliers(df)
+        df = remove_outliers(df, factor=outlier_factor)
     df = standardise_columns(df)
     return df

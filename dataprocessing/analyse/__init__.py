@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
+from dataprocessing._defaults import DEFAULT_IQR_FACTOR, check_positive
+
 
 def _require_column(df, column):
     if column not in df.columns:
@@ -122,13 +124,17 @@ def distribution(df, column, bins=10):
     }
 
 
-def detect_outliers(df, columns=None):
+def detect_outliers(df, columns=None, factor=DEFAULT_IQR_FACTOR):
     """Index labels of IQR outliers, per numeric column.
 
     Bounds are computed over non-null values. Previously a single null made
     every bound NaN, every comparison False, and the report came back empty —
     a confident "no outliers" for a column that had them.
+
+    `factor` is the multiplier on the interquartile range. It shares a default
+    with `clean.remove_outliers`, so what this reports is what that would drop.
     """
+    check_positive(factor)
     if columns is None:
         columns = _numeric_columns(df)
 
@@ -143,8 +149,8 @@ def detect_outliers(df, columns=None):
         q1 = col_data.quantile(0.25)
         q3 = col_data.quantile(0.75)
         iqr = q3 - q1
-        lo = q1 - 1.5 * iqr
-        hi = q3 + 1.5 * iqr
+        lo = q1 - factor * iqr
+        hi = q3 + factor * iqr
         mask = (col < lo) | (col > hi)
         outliers[column] = [
             label.item() if hasattr(label, 'item') else label
