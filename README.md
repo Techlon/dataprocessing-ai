@@ -144,6 +144,22 @@ chart in `visualise` is computed over the non-null values of a column. In
 numeric or datetime only when at least 90% of its non-null values convert
 cleanly. Anything else stays text.
 
+That 90% is adjustable, because the right value depends on the data. Raise it
+when a column might be *coincidentally* parseable — product codes like
+`03-11-2024-A` can be 94% date-shaped, and converting them blanks the rest.
+Lower it for a real date column carrying messy entries, where the default would
+leave the whole column as text:
+
+```python
+from dataprocessing.clean import fix_types, clean_all
+
+fix_types(df, threshold=1.0)              # only if every value converts
+clean_all(df, type_threshold=0.7)         # same dial, from the top level
+```
+
+Values that fail an accepted conversion become null, so a lower threshold trades
+data for usable types.
+
 **Functions return new frames.** No function in `clean` or `transform` modifies
 the DataFrame you pass it.
 

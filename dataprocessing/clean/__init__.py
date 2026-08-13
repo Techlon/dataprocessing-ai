@@ -14,7 +14,20 @@ def drop_nulls(df, threshold=0.5):
     return df.drop(columns=cols_to_drop).dropna()
 
 
-def _try_convert(series, threshold=0.9):
+DEFAULT_TYPE_THRESHOLD = 0.9
+"""Share of a column's non-null values that must convert for the conversion to
+be accepted. 0.9 suits most data; see `fix_types` for when to change it."""
+
+
+def _check_threshold(threshold):
+    if not 0 <= threshold <= 1:
+        raise ValueError(
+            f"threshold must be between 0 and 1, got {threshold!r}. "
+            "It is a share of non-null values, not a percentage."
+        )
+
+
+def _try_convert(series, threshold=DEFAULT_TYPE_THRESHOLD):
     """Return a converted series, or None to leave the column as text.
 
     A conversion is accepted only if at least `threshold` of the non-null values
@@ -22,6 +35,7 @@ def _try_convert(series, threshold=0.9):
     ordinary text column — names, cities, product codes — entirely into NaT and
     destroys the data silently. The guard is what makes a speculative parse safe.
     """
+    _check_threshold(threshold)
     non_null = int(series.notna().sum())
     if non_null == 0:
         return None
@@ -45,12 +59,27 @@ def _try_convert(series, threshold=0.9):
     return None
 
 
-def fix_types(df):
+def fix_types(df, threshold=DEFAULT_TYPE_THRESHOLD):
     """Coerce object columns to numeric or datetime where the data supports it.
 
     Columns that are already numeric, boolean, or datetime are left alone.
     Text that does not convert cleanly stays text.
+
+    `threshold` is the share of a column's non-null values that must convert
+    before the conversion is accepted, and 0.9 is a judgement rather than a
+    fact — the right value depends on the data:
+
+    - Raise it (0.99, or 1.0 for "only if everything converts") when a column
+      could be *coincidentally* parseable. Product codes like "03-11-2024-A"
+      may be 94% date-shaped, and accepting that conversion blanks the other 6%.
+    - Lower it (say 0.7) for a genuine date column carrying messy entries —
+      "N/A", "unknown", typos. At 0.9 the whole column stays text and you lose
+      date handling for the 75% that were fine.
+
+    Values that fail the accepted conversion become null, so a lower threshold
+    trades data for usable types. That is the trade-off the number controls.
     """
+    _check_threshold(threshold)
     df = df.copy()
     for col in df.columns:
         # Check bool BEFORE numeric: pandas treats bool as a numeric dtype, so
@@ -61,7 +90,7 @@ def fix_types(df):
             continue
         if pd.api.types.is_datetime64_any_dtype(df[col]):
             continue
-        converted = _try_convert(df[col])
+        converted = _try_convert(df[col], threshold=threshold)
         if converted is not None:
             df[col] = converted
     return df
@@ -110,7 +139,8 @@ def standardise_columns(df):
     return df
 
 
-def clean_all(df, remove_outlier_rows=True):
+def clean_all(df, remove_outlier_rows=True, null_threshold=0.5,
+              type_threshold=DEFAULT_TYPE_THRESHOLD):
     """Run the full cleaning pipeline.
 
     Note that this is lossy by design, and more so than it looks: `drop_nulls`
@@ -122,9 +152,14 @@ def clean_all(df, remove_outlier_rows=True):
     `remove_outlier_rows` is exposed because dropping outliers is a judgement,
     not a repair: the extreme value is sometimes the observation that matters.
     It defaults to True to preserve the behaviour of earlier releases.
+
+    The two thresholds are named separately because they govern different steps:
+    `null_threshold` is the share of nulls above which a column is dropped, and
+    `type_threshold` is the share of values that must convert before a column's
+    type is changed (see `fix_types`). Both keep their previous defaults.
     """
-    df = drop_nulls(df)
-    df = fix_types(df)
+    df = drop_nulls(df, threshold=null_threshold)
+    df = fix_types(df, threshold=type_threshold)
     df = remove_duplicates(df)
     if remove_outlier_rows:
         df = remove_outliers(df)

@@ -119,6 +119,18 @@ volume of corrected behaviour is substantive.
   Cleaning drops every row containing any null, so a dataset with 5% of cells
   missing loses roughly a quarter of its rows — a large, silent reduction the
   caller previously had no way to notice from the response alone.
+- **The type-conversion threshold is adjustable.** The guard that stops
+  `fix_types` blanking a text column accepts a conversion only when 90% of a
+  column's non-null values survive it. That 90% is a judgement, not a fact —
+  a coincidentally date-shaped column wants a stricter value, a genuine date
+  column full of `"N/A"` wants a looser one — but it sat on a private helper
+  that `fix_types` called without passing anything through, so it could not be
+  changed without reaching into internals. It is now a parameter on `fix_types`
+  and on `clean_all` (as `type_threshold`), exported as
+  `DEFAULT_TYPE_THRESHOLD`, and validated: a value outside 0–1 raises rather
+  than silently doing nothing, since passing `90` for 90% is the obvious slip.
+- **`clean_all` also exposes `null_threshold`**, which was previously fixed at
+  0.5 for anyone using the pipeline rather than calling `drop_nulls` directly.
 - **`clean_all` takes `remove_outlier_rows`** (default `True`, unchanged).
   Dropping outliers is a judgement rather than a repair — the extreme value is
   sometimes the observation that matters — so it is now possible to decline it
@@ -169,7 +181,7 @@ volume of corrected behaviour is substantive.
 
 ### Tests
 
-62 → 145. The new tests are regressions for the above, plus coverage of the two
+62 → 153. The new tests are regressions for the above, plus coverage of the two
 merge interfaces; two existing tests were corrected where they asserted the old
 wrong behaviour.
 

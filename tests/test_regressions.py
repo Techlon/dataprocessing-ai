@@ -696,3 +696,74 @@ def test_clean_all_outlier_removal_is_optional():
     df = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0, 1000.0]})
     assert len(clean_all(df)) == 4
     assert len(clean_all(df, remove_outlier_rows=False)) == 5
+
+
+# ===========================================================================
+# The type-conversion threshold is reachable, not welded shut
+# ===========================================================================
+
+# 9 of 10 values parse as dates — exactly the 0.9 default, so the default
+# accepts it and anything stricter does not.
+NINE_OF_TEN_DATES = [f"2024-01-0{i}" for i in range(1, 10)] + ["not a date"]
+
+# 3 of 4 parse — below the default, so only a lowered threshold accepts it.
+THREE_OF_FOUR_DATES = ["2024-01-01", "2024-06-15", "2024-12-31", "unknown"]
+
+
+def test_default_threshold_is_ninety_percent():
+    from dataprocessing.clean import DEFAULT_TYPE_THRESHOLD
+
+    assert DEFAULT_TYPE_THRESHOLD == 0.9
+
+
+def test_fix_types_accepts_a_stricter_threshold():
+    # A column that is only coincidentally date-shaped: at the default it
+    # converts and the odd one out is blanked; at 1.0 it stays text intact.
+    df = pd.DataFrame({"code": NINE_OF_TEN_DATES})
+
+    default = fix_types(df)
+    assert pd.api.types.is_datetime64_any_dtype(default["code"])
+    assert default["code"].isna().sum() == 1  # the value that did not parse
+
+    strict = fix_types(df, threshold=1.0)
+    assert strict["code"].tolist() == NINE_OF_TEN_DATES  # nothing lost
+
+
+def test_fix_types_accepts_a_looser_threshold():
+    # A genuine date column carrying messy entries. The default leaves it as
+    # text; lowering the threshold buys date handling at the cost of the
+    # entries that could not be parsed.
+    df = pd.DataFrame({"when": THREE_OF_FOUR_DATES})
+
+    assert not pd.api.types.is_datetime64_any_dtype(fix_types(df)["when"])
+
+    loose = fix_types(df, threshold=0.7)
+    assert pd.api.types.is_datetime64_any_dtype(loose["when"])
+    assert loose["when"].isna().sum() == 1
+
+
+def test_clean_all_passes_the_threshold_through():
+    # The point of the change: reachable from the top-level entry point,
+    # without touching the private helper.
+    df = pd.DataFrame({"when": THREE_OF_FOUR_DATES, "n": [1, 2, 3, 4]})
+
+    assert not pd.api.types.is_datetime64_any_dtype(
+        clean_all(df, type_threshold=0.9)["when"]
+    )
+    assert pd.api.types.is_datetime64_any_dtype(
+        clean_all(df, type_threshold=0.7, remove_outlier_rows=False)["when"]
+    )
+
+
+def test_clean_all_exposes_the_null_threshold():
+    df = pd.DataFrame({"keep": [1, 2, 3, 4], "half_null": [1.0, None, 3.0, None]})
+    assert "half_null" in clean_all(df).columns          # 0.5 is not > 0.5
+    assert "half_null" not in clean_all(df, null_threshold=0.4).columns
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5, 90])
+def test_threshold_outside_zero_to_one_raises(bad):
+    # 90 is the likely mistake: a percentage where a share is wanted.
+    df = pd.DataFrame({"a": ["x"]})
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        fix_types(df, threshold=bad)
