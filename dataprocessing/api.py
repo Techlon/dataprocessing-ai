@@ -46,6 +46,11 @@ class CleanRequest(BaseModel):
     # drops the row) is the historical behaviour and costs about a quarter of
     # the rows on data with 5% of cells missing; 1.0 keeps every row.
     row_null_threshold: float = DEFAULT_ROW_NULL_THRESHOLD
+    # Parity with the MCP clean_data tool, which has always offered these two.
+    # This endpoint deduplicated and renamed columns unconditionally, so a
+    # caller who wanted their column names left alone had no way to say so.
+    remove_dupes: bool = True
+    standardise_cols: bool = True
     remove_outliers: bool = False
     # The multiplier on the IQR that sets the outlier fence. Only consulted
     # when remove_outliers is true; 3.0 removes fewer rows than the 1.5 default.
@@ -117,12 +122,14 @@ def clean(req: CleanRequest):
         rows_in, columns_in = len(df), len(df.columns)
         df = drop_nulls(df, threshold=req.drop_null_threshold,
                         row_threshold=req.row_null_threshold)
-        df = remove_duplicates(df)
+        if req.remove_dupes:
+            df = remove_duplicates(df)
         # The request model has always offered this flag; it was declared and
         # then ignored, so callers asking for outlier removal silently got none.
         if req.remove_outliers:
             df = remove_outliers_iqr(df, factor=req.outlier_factor)
-        df = standardise_columns(df)
+        if req.standardise_cols:
+            df = standardise_columns(df)
         return {
             "data": df_to_json(df),
             "rows": len(df),

@@ -163,6 +163,10 @@ volume of corrected behaviour is substantive.
   JSON. This matches `summary_stats`, which already did this.
 - **The MCP `clean_data` tool offers outlier removal**, matching the REST
   `/clean` endpoint's option.
+- **`/clean` offers `remove_dupes` and `standardise_cols`**, which the MCP tool
+  had and it did not: the endpoint deduplicated rows and renamed columns
+  unconditionally, so a caller who wanted their column names left alone had no
+  way to say so. A test now asserts the two interfaces expose the same options.
 - **`value_counts` accepts any column type.** It rejected non-numeric columns,
   which excluded exactly the columns worth counting. The test asserting that
   rejection encoded the wrong expectation and was corrected.
@@ -204,7 +208,7 @@ volume of corrected behaviour is substantive.
 
 ### Tests
 
-62 → 176. The new tests are regressions for the above, plus coverage of the two
+62 → 188. The new tests are regressions for the above, plus coverage of the two
 merge interfaces; two existing tests were corrected where they asserted the old
 wrong behaviour.
 

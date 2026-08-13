@@ -956,3 +956,107 @@ async def test_mcp_clean_data_accepts_row_null_threshold():
         "clean_data", {"data": rows, "row_null_threshold": 1.0})
     assert strict[1]["result"]["rows"] == 1
     assert lenient[1]["result"]["rows"] == 2
+
+
+# ===========================================================================
+# JSON safety is guaranteed at the source, not only at the boundary
+# ===========================================================================
+# A mutation sweep showed that removing to_native from the API and MCP handlers
+# broke no test — because analyse and visualise now return native Python types
+# themselves, making to_native redundant defence rather than the fix. These
+# tests pin that underlying guarantee, so a future numpy leak fails here rather
+# than silently relying on the boundary to paper over it.
+
+def test_full_report_is_json_safe_without_to_native():
+    df = pd.DataFrame({"age": [23, 35, None, 900], "city": ["A", "B", "A", "C"]})
+    json.dumps(full_report(df))  # no to_native
+
+
+def test_full_report_leaks_no_numpy_types():
+    df = pd.DataFrame({"age": [23, 35, None, 900], "city": ["A", "B", "A", "C"]})
+
+    def walk(obj, path=""):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                assert type(key).__module__ != "numpy", f"numpy key at {path}"
+                walk(value, f"{path}.{key}")
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item, path + "[]")
+        else:
+            assert type(obj).__module__ != "numpy", f"numpy value at {path}: {type(obj)}"
+
+    walk(full_report(df))
+
+
+@pytest.mark.parametrize("chart,params", [
+    ("histogram", {"column": "n", "bins": 3}),
+    ("bar_chart", {"column": "g"}),
+    ("scatter", {"x": "n", "y": "m"}),
+    ("line_chart", {"x": "n", "y": "m"}),
+    ("correlation_heatmap", {}),
+])
+def test_chart_specs_are_json_safe_without_to_native(chart, params):
+    from dataprocessing import visualise
+
+    df = pd.DataFrame({"n": [1.0, 2.0, 3.0, 4.0], "m": [4.0, 3.0, 2.0, 1.0],
+                       "g": ["a", "b", "a", "b"]})
+    json.dumps(getattr(visualise, chart)(df, **params))
+
+
+def test_to_native_converts_numpy_scalars_and_arrays():
+    # to_native itself is pinned directly, since its callers no longer depend
+    # on it to produce serialisable output.
+    out = to_native({
+        "i": np.int64(3), "f": np.float64(1.5), "b": np.bool_(True),
+        "arr": np.array([1, 2]), "nested": [{"x": np.int32(7)}],
+    })
+    assert out == {"i": 3, "f": 1.5, "b": True, "arr": [1, 2], "nested": [{"x": 7}]}
+    json.dumps(out)
+
+
+def test_to_native_converts_numpy_dict_keys():
+    assert to_native({np.int64(1): np.float64(2.0)}) == {1: 2.0}
+
+
+def test_chart_values_are_exactly_native_types():
+    # bar_chart's int() looks redundant on pandas 3.x, where iterating a Series
+    # already yields Python ints — but it is load-bearing on pandas 2.2, which
+    # this package still supports. Asserting the type pins it on both.
+    from dataprocessing.visualise import bar_chart, histogram
+
+    df = pd.DataFrame({"g": ["a", "b", "a"], "n": [1.0, 2.0, 3.0]})
+    for row in bar_chart(df, "g")["data"]["values"]:
+        assert type(row["count"]) is int
+        assert type(row["category"]) is str
+    for row in histogram(df, "n", bins=2)["data"]["values"]:
+        assert type(row["count"]) is int
+        assert type(row["bin_start"]) is float
+
+
+def test_clean_endpoint_reaches_parity_with_the_mcp_tool():
+    # /clean deduplicated and renamed columns unconditionally while the MCP
+    # clean_data tool let the caller decline both — the same interface drift
+    # that hid the analyse_data failure, pointing the other way.
+    rows = [{"First Name": "Ada"}, {"First Name": "Ada"}, {"First Name": "Bob"}]
+
+    default = client.post("/clean", json={"data": rows}).json()
+    assert default["columns"] == ["first_name"] and default["rows"] == 2
+
+    kept = client.post("/clean", json={
+        "data": rows, "remove_dupes": False, "standardise_cols": False,
+    }).json()
+    assert kept["columns"] == ["First Name"] and kept["rows"] == 3
+
+
+def test_clean_options_match_across_interfaces():
+    # Guards against the two drifting apart again.
+    import inspect
+    from dataprocessing import mcp_server
+    from dataprocessing.api import CleanRequest
+
+    rest = set(CleanRequest.model_fields) - {"data"}
+    tool = set(inspect.signature(mcp_server.clean_data).parameters) - {"data"}
+    # The REST field is named for the operation it controls; the tool predates it.
+    rest = {"remove_outlier_rows" if f == "remove_outliers" else f for f in rest}
+    assert rest == tool, f"only in REST: {rest - tool}; only in MCP: {tool - rest}"
