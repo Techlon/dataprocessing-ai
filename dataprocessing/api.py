@@ -5,16 +5,21 @@ Any AI agent can call these endpoints.
 """
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Union
 import pandas as pd
 import io
 import json
 
-from dataprocessing.clean import drop_nulls, remove_duplicates, standardise_columns
+from dataprocessing import __version__
+from dataprocessing._serialise import df_to_json, to_native
+from dataprocessing.clean import (
+    drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
+    standardise_columns,
+)
 from dataprocessing.transform import (
     filter_rows, select_columns, rename_columns,
-    sort_rows, group_and_aggregate, pivot, add_column
+    sort_rows, group_and_aggregate, pivot, add_column, merge_dataframes
 )
 from dataprocessing.analyse import full_report
 
@@ -22,7 +27,7 @@ from dataprocessing.visualise import (
     histogram, bar_chart, scatter, line_chart, correlation_heatmap
 )
 
-app = FastAPI(title="DataProcessing API", version="0.1.0")
+app = FastAPI(title="DataProcessing API", version=__version__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,28 +35,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-def df_to_json(df):
-    return json.loads(df.where(df.notna(), other=None).to_json(orient="records"))
-
-def to_native(obj):
-    """Recursively convert numpy scalars/arrays to JSON-serialisable Python types.
-
-    full_report() returns dicts containing numpy int64/float64 values and numpy
-    arrays, which FastAPI's encoder cannot serialise. This normalises them.
-    """
-    import numpy as np
-    if isinstance(obj, dict):
-        return {to_native(k): to_native(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [to_native(v) for v in obj]
-    if isinstance(obj, np.generic):
-        return obj.item()
-    if isinstance(obj, np.ndarray):
-        return [to_native(v) for v in obj.tolist()]
-    if isinstance(obj, float) and (obj != obj):  # NaN -> null
-        return None
-    return obj
 
 class CleanRequest(BaseModel):
     data: List[Dict[str, Any]]
@@ -66,15 +49,33 @@ class TransformRequest(BaseModel):
 class AnalyseRequest(BaseModel):
     data: List[Dict[str, Any]]
 
+class MergeRequest(BaseModel):
+    """A merge needs two datasets, so it cannot use the single-payload shape
+    the other transform endpoints share."""
+    left: List[Dict[str, Any]]
+    right: List[Dict[str, Any]]
+    on: Optional[Union[str, List[str]]] = None
+    how: str = "inner"
+    # The JSON key stays "validate" to match pandas' own vocabulary; the Python
+    # attribute is renamed because a field called `validate` shadows a
+    # BaseModel attribute and pydantic warns about it.
+    validate_join: Optional[str] = Field(default=None, alias="validate")
+    suffixes: List[str] = ["_x", "_y"]
+
+    model_config = {"populate_by_name": True}
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": __version__}
 
 @app.post("/ingest")
 async def ingest(file: UploadFile = File(...)):
     try:
         contents = await file.read()
-        ext = file.filename.rsplit(".", 1)[-1].lower()
+        # A filename with no dot used to yield the whole name as the extension,
+        # so the error read "Unsupported file type: myexport".
+        filename = file.filename or ""
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext == "csv":
             df = pd.read_csv(io.BytesIO(contents))
         elif ext == "json":
@@ -83,8 +84,16 @@ async def ingest(file: UploadFile = File(...)):
             df = pd.read_excel(io.BytesIO(contents))
         elif ext == "parquet":
             df = pd.read_parquet(io.BytesIO(contents))
+        elif ext == "txt":
+            # read_file and the MCP ingest_file tool have always accepted .txt;
+            # this endpoint rejected it, so the two interfaces disagreed.
+            df = pd.read_csv(io.BytesIO(contents), sep=None, engine="python")
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {ext or filename!r}. "
+                       "Supported: csv, json, xlsx, parquet, txt",
+            )
         return {"data": df_to_json(df), "rows": len(df), "columns": list(df.columns)}
     except HTTPException:
         raise
@@ -95,10 +104,26 @@ async def ingest(file: UploadFile = File(...)):
 def clean(req: CleanRequest):
     try:
         df = pd.DataFrame(req.data)
+        rows_in, columns_in = len(df), len(df.columns)
         df = drop_nulls(df, threshold=req.drop_null_threshold)
         df = remove_duplicates(df)
+        # The request model has always offered this flag; it was declared and
+        # then ignored, so callers asking for outlier removal silently got none.
+        if req.remove_outliers:
+            df = remove_outliers_iqr(df)
         df = standardise_columns(df)
-        return {"data": df_to_json(df), "rows": len(df), "columns": list(df.columns)}
+        return {
+            "data": df_to_json(df),
+            "rows": len(df),
+            "columns": list(df.columns),
+            # Cleaning drops every row holding any null, which costs far more
+            # rows than callers expect. Reporting the input size makes the loss
+            # visible in the response instead of something to think to check.
+            "rows_in": rows_in,
+            "columns_in": columns_in,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -121,6 +146,38 @@ def transform(req: TransformRequest):
         return {"data": df_to_json(result), "rows": len(result), "columns": list(result.columns)}
     except HTTPException:
         raise
+    except (ValueError, KeyError, TypeError) as e:
+        # A bad column name or a malformed params dict is the caller's mistake,
+        # not a server fault; these previously came back as 500s.
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/merge")
+def merge(req: MergeRequest):
+    try:
+        if len(req.suffixes) != 2:
+            raise ValueError("suffixes must be a list of exactly two strings.")
+        left = pd.DataFrame(req.left)
+        right = pd.DataFrame(req.right)
+        result = merge_dataframes(
+            left, right,
+            on=req.on,
+            how=req.how,
+            validate=req.validate_join,
+            suffixes=tuple(req.suffixes),
+        )
+        return {
+            "data": df_to_json(result),
+            "rows": len(result),
+            "columns": list(result.columns),
+            # Row counts are reported because a join's usual failure is silent
+            # inflation: the caller can see 3 x 3 rows became 9.
+            "left_rows": len(left),
+            "right_rows": len(right),
+        }
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -129,6 +186,8 @@ def analyse(req: AnalyseRequest):
     try:
         df = pd.DataFrame(req.data)
         return to_native(full_report(df))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
         

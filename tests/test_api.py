@@ -2,15 +2,18 @@ import io
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
-from dataprocessing.api import app
+from dataprocessing.api import app, __version__
 
 client = TestClient(app)
 
 
 def test_health():
+    # Asserted against the module's own version rather than a literal: the
+    # hardcoded "0.1.0" here went stale the moment the package moved to 0.1.1,
+    # and the test kept passing while /health reported the wrong version.
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.1.0"}
+    assert response.json() == {"status": "ok", "version": __version__}
 
 
 def test_ingest_csv():

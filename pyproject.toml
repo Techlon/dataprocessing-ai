@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataprocessing-ai"
-version = "0.1.1"
+version = "0.2.0"
 description = "AI-native data processing library — REST API, MCP server, and Python package"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,14 +14,28 @@ authors = [
 ]
 keywords = ["data", "processing", "AI", "REST", "MCP", "pandas"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+  "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
 dependencies = [
-    "pandas>=2.2.0",
-    "numpy>=1.26.0",
+    # Upper bounds are deliberate. An unbounded `mcp>=0.9.0` let mcp 2.0 remove
+    # the API this package builds on, breaking installs silently; these are the
+    # same shape of risk. The suite is run against both ends of this range:
+    # pandas 2.2.0/numpy 1.26.4 and pandas 3.0.x/numpy 2.x.
+    "pandas>=2.2.0,<4.0.0",
+    "numpy>=1.26.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +46,11 @@ api = [
     "python-multipart>=0.0.9",
 ]
 mcp = [
-    "mcp>=0.9.0",
+    # Upper bound is load-bearing: mcp 2.0.0 removed mcp.server.fastmcp
+    # (FastMCP became MCPServer), so an unbounded install resolves to 2.x and
+    # the MCP server fails at import. Verified present in 1.2.0 through 1.29.0.
+    # Lifting this bound means porting mcp_server.py to the 2.x API.
+    "mcp>=1.2.0,<2.0.0",
 ]
 formats = [
     "openpyxl>=3.1.0",

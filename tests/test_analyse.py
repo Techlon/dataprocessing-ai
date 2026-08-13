@@ -46,9 +46,18 @@ def test_value_counts(sample_df):
     assert all(counts[v] == 1 for v in [1.0, 2.0, 3.0, 4.0, 5.0])
 
 
-def test_value_counts_non_numeric_raises(sample_df):
+def test_value_counts_counts_text_columns(sample_df):
+    # This previously asserted that a text column RAISED. That expectation was
+    # backwards: counting distinct values is a categorical operation, and the
+    # columns most worth counting are text ones. The guard excluded exactly the
+    # useful cases, so the guard went and the expectation was corrected.
+    counts = value_counts(sample_df, "D")
+    assert counts == {"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}
+
+
+def test_value_counts_missing_column_raises(sample_df):
     with pytest.raises(ValueError):
-        value_counts(sample_df, "D")
+        value_counts(sample_df, "nope")
 
 
 def test_missing_report(sample_df):

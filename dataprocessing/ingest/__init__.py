@@ -1,6 +1,8 @@
-import pandas as pd
+import json
 from pathlib import Path
 from typing import Union
+
+import pandas as pd
 
 def read_csv(file_path: str) -> pd.DataFrame:
     """
@@ -20,15 +22,31 @@ def read_csv(file_path: str) -> pd.DataFrame:
 def read_json(file_path: str) -> pd.DataFrame:
     """
     Reads a JSON file and returns a pandas DataFrame.
-    
+
+    A file holding a single JSON object of scalars — `{"a": 1, "b": 2}` — is a
+    perfectly ordinary one-row export, but pd.read_json rejects it with "If
+    using all scalar values, you must pass an index". Such a file is read as
+    one row rather than failing.
+
     Parameters:
         file_path (str): The path to the JSON file.
-        
+
     Returns:
         pd.DataFrame: A DataFrame containing the data from the JSON file.
     """
     try:
         return pd.read_json(file_path)
+    except ValueError:
+        try:
+            with open(file_path) as handle:
+                payload = json.load(handle)
+        except Exception as e:
+            raise ValueError(f"Error reading JSON file {file_path}: {e}")
+        if isinstance(payload, dict) and not any(
+            isinstance(v, (list, dict)) for v in payload.values()
+        ):
+            return pd.DataFrame([payload])
+        raise ValueError(f"Error reading JSON file {file_path}: unsupported JSON structure")
     except Exception as e:
         raise ValueError(f"Error reading JSON file {file_path}: {e}")
 
@@ -62,18 +80,27 @@ def read_parquet(file_path: str) -> pd.DataFrame:
     except Exception as e:
         raise ValueError(f"Error reading Parquet file {file_path}: {e}")
 
-def read_txt(file_path: str) -> pd.DataFrame:
+def read_txt(file_path: str, delimiter: str = None) -> pd.DataFrame:
     """
-    Reads a plain text file and returns a pandas DataFrame. The text file is assumed to be comma-separated if no delimiter is specified.
-    
+    Reads a delimited text file and returns a pandas DataFrame.
+
+    The delimiter is sniffed when not given. The previous implementation chose
+    between two branches that both read comma-separated data, so a tab- or
+    semicolon-separated .txt came back as a single column with the delimiter
+    embedded in the values.
+
     Parameters:
         file_path (str): The path to the text file.
-        
+        delimiter (str): Field separator. Sniffed from the file when omitted.
+
     Returns:
         pd.DataFrame: A DataFrame containing the data from the text file.
     """
     try:
-        return pd.read_csv(file_path, delimiter=",") if Path(file_path).suffix == ".txt" else pd.read_csv(file_path)
+        if delimiter is not None:
+            return pd.read_csv(file_path, delimiter=delimiter)
+        # sep=None asks the python engine to sniff the separator.
+        return pd.read_csv(file_path, sep=None, engine="python")
     except Exception as e:
         raise ValueError(f"Error reading text file {file_path}: {e}")
 

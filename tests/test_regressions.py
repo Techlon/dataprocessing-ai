@@ -1,0 +1,698 @@
+"""Regression tests for the defects fixed in 0.1.2.
+
+Each test here failed against 0.1.1. They are grouped in one file because they
+were found in a single audit pass; each names the behaviour it pins down.
+"""
+import json
+
+import numpy as np
+import pandas as pd
+import pytest
+from fastapi.testclient import TestClient
+
+from dataprocessing._serialise import df_to_json, to_native
+from dataprocessing.analyse import (
+    detect_outliers, distribution, full_report, summary_stats,
+)
+from dataprocessing.api import app
+from dataprocessing.clean import (
+    clean_all, drop_nulls, fix_types, remove_duplicates, remove_outliers,
+    standardise_columns,
+)
+from dataprocessing.transform import add_column, filter_rows, group_and_aggregate
+from dataprocessing.visualise import correlation_heatmap, histogram, line_chart
+
+client = TestClient(app)
+
+
+# --- clean: fix_types destroyed text columns -------------------------------
+
+def test_fix_types_preserves_text_columns():
+    # 0.1.1 ran pd.to_datetime(errors="coerce") over every object column, so a
+    # column of names became entirely NaT.
+    df = pd.DataFrame({"name": ["Ada Lovelace", "Bob Smith", "Cy Jones"]})
+    out = fix_types(df)
+    assert out["name"].tolist() == ["Ada Lovelace", "Bob Smith", "Cy Jones"]
+
+
+def test_fix_types_still_converts_real_dates():
+    df = pd.DataFrame({"when": ["2024-01-01", "2024-06-15", "2024-12-31"]})
+    out = fix_types(df)
+    assert pd.api.types.is_datetime64_any_dtype(out["when"])
+
+
+def test_fix_types_still_converts_numeric_strings():
+    df = pd.DataFrame({"n": ["1", "2", "3"]})
+    out = fix_types(df)
+    assert pd.api.types.is_numeric_dtype(out["n"])
+
+
+def test_clean_all_preserves_text_end_to_end():
+    df = pd.DataFrame({
+        "Full Name": ["Ada Lovelace", "Bob Smith", "Cy Jones"],
+        "age": [36, 41, 29],
+    })
+    cleaned = clean_all(df)
+    assert cleaned["full_name"].tolist() == ["Ada Lovelace", "Bob Smith", "Cy Jones"]
+
+
+# --- clean: functions mutated the caller's DataFrame ------------------------
+
+def test_clean_functions_do_not_mutate_caller():
+    df = pd.DataFrame({"A B": [1.0, None, 3.0]})
+    original_columns = list(df.columns)
+    original_rows = len(df)
+
+    drop_nulls(df)
+    remove_duplicates(df)
+    standardise_columns(df)
+
+    assert list(df.columns) == original_columns
+    assert len(df) == original_rows
+
+
+def test_standardise_columns_handles_non_string_names():
+    # A pivot produces integer column labels; col.lower() raised AttributeError.
+    df = pd.DataFrame({1: [1], 2: [2]})
+    assert list(standardise_columns(df).columns) == ["1", "2"]
+
+
+def test_standardise_columns_strips_whitespace():
+    df = pd.DataFrame({"First Name ": [1]})
+    assert list(standardise_columns(df).columns) == ["first_name"]
+
+
+def test_remove_outliers_rejects_unknown_method():
+    # Previously any method other than 'iqr' silently returned the frame intact.
+    df = pd.DataFrame({"A": [1.0, 2.0, 3.0]})
+    with pytest.raises(ValueError):
+        remove_outliers(df, method="zscore")
+
+
+def test_remove_outliers_rejects_non_numeric_column():
+    df = pd.DataFrame({"name": ["a", "b", "c"]})
+    with pytest.raises(ValueError):
+        remove_outliers(df, columns=["name"])
+
+
+# --- analyse: nulls poisoned every statistic --------------------------------
+
+def test_summary_stats_quartiles_survive_nulls():
+    # np.percentile returned NaN for every statistic if one null was present.
+    df = pd.DataFrame({"age": [23.0, 35.0, np.nan, 42.0]})
+    s = summary_stats(df)["age"]
+    assert s["quartiles"]["25%"] is not None
+    assert s["quartiles"]["75%"] is not None
+    assert s["mean"] == pytest.approx(33.333333, rel=1e-4)
+
+
+def test_summary_stats_count_excludes_nulls():
+    df = pd.DataFrame({"age": [23.0, 35.0, np.nan, 42.0]})
+    s = summary_stats(df)["age"]
+    assert s["count"] == 3
+    assert s["null_count"] == 1
+
+
+def test_summary_stats_all_null_column():
+    df = pd.DataFrame({"age": [np.nan, np.nan]})
+    s = summary_stats(df)["age"]
+    assert s["count"] == 0
+    assert s["mean"] is None
+
+
+def test_detect_outliers_finds_outlier_despite_nulls():
+    # The worst of the null bugs: bounds became NaN, every comparison was
+    # False, and the report confidently came back empty.
+    df = pd.DataFrame({"age": [23.0, 35.0, np.nan, 42.0, 900.0]})
+    assert 4 in detect_outliers(df)["age"]
+
+
+def test_distribution_survives_nulls():
+    df = pd.DataFrame({"age": [23.0, 35.0, np.nan, 42.0]})
+    dist = distribution(df, "age", bins=2)
+    assert sum(dist["counts"]) == 3
+
+
+def test_summary_stats_missing_column_raises():
+    df = pd.DataFrame({"a": [1]})
+    with pytest.raises(ValueError):
+        summary_stats(df, columns=["nope"])
+
+
+# --- JSON safety across the interface boundary ------------------------------
+
+def test_full_report_is_json_safe_after_to_native():
+    df = pd.DataFrame({"age": [23, 35, 42], "city": ["A", "B", "C"]})
+    json.dumps(to_native(full_report(df)))  # raised TypeError on numpy int64
+
+
+def test_to_native_converts_nan_to_none():
+    assert to_native({"x": float("nan")}) == {"x": None}
+
+
+def test_df_to_json_preserves_group_keys():
+    # orient="records" drops the index, and group keys live in the index, so
+    # both interfaces returned rows nothing could tell apart.
+    df = pd.DataFrame({"city": ["A", "A", "B"], "n": [1, 2, 3]})
+    grouped = group_and_aggregate(df, "city", {"n": "sum"})
+    records = df_to_json(grouped)
+    assert records == [{"city": "A", "n": 3}, {"city": "B", "n": 3}]
+
+
+def test_df_to_json_leaves_plain_index_alone():
+    df = pd.DataFrame({"a": [1, 2]})
+    assert df_to_json(df) == [{"a": 1}, {"a": 2}]
+
+
+# --- visualise --------------------------------------------------------------
+
+def test_histogram_survives_nulls():
+    df = pd.DataFrame({"age": [23.0, 35.0, np.nan, 42.0]})
+    spec = histogram(df, "age", bins=2)
+    assert sum(row["count"] for row in spec["data"]["values"]) == 3
+
+
+def test_histogram_description_names_the_column():
+    # The description was the literal string "Histogram of <column>".
+    df = pd.DataFrame({"age": [23, 35, 42]})
+    assert histogram(df, "age")["description"] == "Histogram of age"
+
+
+def test_line_chart_emits_no_nan():
+    df = pd.DataFrame({"t": [1, 2, 3], "y": [1.0, np.nan, 3.0]})
+    spec = line_chart(df, "t", "y")
+    assert "NaN" not in json.dumps(spec["data"]["values"])
+    assert len(spec["data"]["values"]) == 2
+
+
+def test_correlation_heatmap_rejects_named_non_numeric_column():
+    # Previously surfaced as "could not convert string to float: 'x'", which
+    # names neither the column nor the real problem.
+    df = pd.DataFrame({"a": [1, 2, 3], "name": ["x", "y", "z"]})
+    with pytest.raises(ValueError, match="name"):
+        correlation_heatmap(df, columns=["a", "name"])
+
+
+def test_visualise_missing_column_raises_valueerror():
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    with pytest.raises(ValueError):
+        histogram(df, "nope")
+
+
+# --- transform --------------------------------------------------------------
+
+def test_filter_rows_missing_column_raises_valueerror():
+    # Was a bare KeyError, which the API turned into a 500.
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    with pytest.raises(ValueError):
+        filter_rows(df, "nope", "gt", 1)
+
+
+def test_filter_rows_bad_operator_lists_valid_ones():
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    with pytest.raises(ValueError, match="contains"):
+        filter_rows(df, "a", "roughly", 1)
+
+
+def test_add_column_does_not_mutate_caller():
+    df = pd.DataFrame({"price": [10.0, 20.0]})
+    add_column(df, "with_vat", "price * 1.2")
+    assert "with_vat" not in df.columns
+
+
+def test_add_column_still_rejects_arbitrary_code():
+    df = pd.DataFrame({"a": [1, 2]})
+    with pytest.raises(Exception):
+        add_column(df, "evil", '__import__("os").getcwd()')
+
+
+# --- REST API ---------------------------------------------------------------
+
+def test_clean_endpoint_honours_remove_outliers():
+    # The flag was declared on the request model and never read.
+    rows = [{"a": v} for v in [1.0, 2.0, 3.0, 4.0, 1000.0]]
+    kept = client.post("/clean", json={"data": rows, "remove_outliers": False})
+    dropped = client.post("/clean", json={"data": rows, "remove_outliers": True})
+    assert kept.json()["rows"] == 5
+    assert dropped.json()["rows"] == 4
+
+
+def test_transform_bad_column_is_client_error():
+    response = client.post("/transform", json={
+        "data": [{"a": 1}],
+        "operation": "filter_rows",
+        "params": {"column": "nope", "operator": "gt", "value": 0},
+    })
+    assert response.status_code == 400
+
+
+def test_transform_group_and_aggregate_keeps_keys_over_http():
+    response = client.post("/transform", json={
+        "data": [{"city": "A", "n": 1}, {"city": "A", "n": 2}, {"city": "B", "n": 3}],
+        "operation": "group_and_aggregate",
+        "params": {"group_by": "city", "aggregations": {"n": "sum"}},
+    })
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"city": "A", "n": 3}, {"city": "B", "n": 3}]
+
+
+def test_analyse_endpoint_with_nulls_and_text():
+    response = client.post("/analyse", json={
+        "data": [{"age": 23, "city": "A"}, {"age": None, "city": "B"}, {"age": 900, "city": "A"}],
+    })
+    assert response.status_code == 200
+    assert response.json()["summary_stats"]["age"]["count"] == 2
+
+
+# --- MCP server -------------------------------------------------------------
+
+async def test_mcp_analyse_data_returns_serialisable_result():
+    # This tool failed for every input: "Unable to serialize unknown type:
+    # numpy.int64". api.py had the to_native fix; mcp_server.py never got it.
+    from dataprocessing import mcp_server
+
+    result = await mcp_server.mcp.call_tool(
+        "analyse_data", {"data": [{"age": 23}, {"age": 35}, {"age": 42}]}
+    )
+    assert "summary_stats" in result[1]["result"]
+
+
+async def test_mcp_visualise_data_returns_serialisable_result():
+    from dataprocessing import mcp_server
+
+    result = await mcp_server.mcp.call_tool(
+        "visualise_data",
+        {"data": [{"city": "A"}, {"city": "A"}, {"city": "B"}],
+         "chart": "bar_chart", "params": {"column": "city"}},
+    )
+    json.dumps(result[1]["result"])
+
+
+async def test_mcp_transform_exposes_pivot():
+    # pivot was wired into the REST API but missing from the MCP tool's map.
+    from dataprocessing import mcp_server
+
+    result = await mcp_server.mcp.call_tool(
+        "transform_data",
+        {"data": [{"city": "A", "q": "x", "n": 1}, {"city": "B", "q": "x", "n": 3}],
+         "operation": "pivot",
+         "params": {"index": "city", "columns": "q", "values": "n"}},
+    )
+    assert result[1]["result"]["rows"] == 2
+
+
+async def test_mcp_group_and_aggregate_keeps_keys():
+    from dataprocessing import mcp_server
+
+    result = await mcp_server.mcp.call_tool(
+        "transform_data",
+        {"data": [{"city": "A", "n": 1}, {"city": "A", "n": 2}, {"city": "B", "n": 3}],
+         "operation": "group_and_aggregate",
+         "params": {"group_by": "city", "aggregations": {"n": "sum"}}},
+    )
+    assert result[1]["result"]["data"] == [{"city": "A", "n": 3}, {"city": "B", "n": 3}]
+
+
+# ===========================================================================
+# Second hardening pass: merge, pivot, rename, ingest
+# ===========================================================================
+
+from dataprocessing.ingest import read_json, read_txt
+from dataprocessing.transform import (
+    merge_dataframes, pivot, rename_columns, select_columns, sort_rows,
+)
+from dataprocessing.analyse import correlation_matrix
+
+
+@pytest.fixture
+def left():
+    return pd.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+
+
+@pytest.fixture
+def right():
+    return pd.DataFrame({"id": [1, 2, 4], "score": [10, 20, 40]})
+
+
+# --- merge_dataframes -------------------------------------------------------
+
+def test_merge_missing_key_names_the_side(left, right):
+    # Was a bare KeyError that said only 'nope', with no hint which frame.
+    with pytest.raises(ValueError, match="right frame"):
+        merge_dataframes(left, right.drop(columns=["id"]), on="id")
+    with pytest.raises(ValueError, match="left frame"):
+        merge_dataframes(left.drop(columns=["id"]), right, on="id")
+
+
+def test_merge_rejects_invalid_how(left, right):
+    with pytest.raises(ValueError, match="Invalid how"):
+        merge_dataframes(left, right, on="id", how="sideways")
+
+
+def test_merge_validate_catches_unintended_fan_out():
+    # The quiet failure mode of joins: 2 rows x 2 rows silently becomes 4.
+    a = pd.DataFrame({"k": [1, 1], "x": ["p", "q"]})
+    b = pd.DataFrame({"k": [1, 1], "y": ["r", "s"]})
+    assert len(merge_dataframes(a, b, on="k")) == 4          # still allowed
+    with pytest.raises(ValueError):                           # now detectable
+        merge_dataframes(a, b, on="k", validate="one_to_one")
+
+
+def test_merge_still_joins_normally(left, right):
+    out = merge_dataframes(left, right, on="id")
+    assert len(out) == 2
+    assert sorted(out.columns) == ["id", "name", "score"]
+
+
+def test_merge_cross_join_needs_no_key(left, right):
+    assert len(merge_dataframes(left, right, on=None, how="cross")) == 9
+
+
+def test_merge_requires_a_key_when_not_cross(left, right):
+    with pytest.raises(ValueError, match="at least one join column"):
+        merge_dataframes(left, right, on=None)
+
+
+# --- pivot ------------------------------------------------------------------
+
+def test_pivot_missing_column_raises_valueerror():
+    df = pd.DataFrame({"a": [1]})
+    with pytest.raises(ValueError, match="nope"):
+        pivot(df, index="nope", columns="a", values="a")
+
+
+def test_pivot_non_numeric_values_explains_aggfunc():
+    # Was "dtype 'str' does not support operation 'mean'", which names neither
+    # the column nor the fix.
+    df = pd.DataFrame({"row": ["a", "b"], "col": ["x", "y"], "val": ["p", "q"]})
+    with pytest.raises(ValueError, match="aggfunc"):
+        pivot(df, index="row", columns="col", values="val")
+
+
+def test_pivot_non_numeric_values_works_with_first():
+    df = pd.DataFrame({"row": ["a", "b"], "col": ["x", "y"], "val": ["p", "q"]})
+    out = pivot(df, index="row", columns="col", values="val", aggfunc="first")
+    assert out.loc["a", "x"] == "p"
+
+
+def test_pivot_multiindex_columns_flatten_in_json():
+    # to_json stringified each column tuple into a key like "('v1', 'x')".
+    df = pd.DataFrame({"row": ["a", "b"], "col": ["x", "y"], "v1": [1, 2], "v2": [3, 4]})
+    records = df_to_json(pivot(df, index="row", columns="col", values=["v1", "v2"]))
+    assert set(records[0]) == {"row", "v1_x", "v1_y", "v2_x", "v2_y"}
+    assert records[0]["row"] == "a" and records[0]["v1_x"] == 1.0
+
+
+# --- rename_columns / select_columns ---------------------------------------
+
+def test_rename_missing_column_no_longer_silent():
+    # Reported success while changing nothing.
+    df = pd.DataFrame({"a": [1], "b": [2]})
+    with pytest.raises(ValueError, match="nope"):
+        rename_columns(df, {"nope": "renamed"})
+
+
+def test_rename_rejects_resulting_duplicate():
+    df = pd.DataFrame({"a": [1], "b": [2]})
+    with pytest.raises(ValueError, match="duplicate"):
+        rename_columns(df, {"a": "b"})
+
+
+def test_rename_still_renames():
+    df = pd.DataFrame({"a": [1], "b": [2]})
+    assert list(rename_columns(df, {"a": "z"}).columns) == ["z", "b"]
+
+
+def test_rename_rejects_non_dict_mapping():
+    with pytest.raises(ValueError, match="dict"):
+        rename_columns(pd.DataFrame({"a": [1]}), [("a", "b")])
+
+
+def test_select_columns_rejects_repeats():
+    df = pd.DataFrame({"a": [1], "b": [2]})
+    with pytest.raises(ValueError, match="more than once"):
+        select_columns(df, ["a", "a"])
+
+
+def test_df_to_json_rejects_duplicate_columns():
+    df = pd.DataFrame([[1, 2]], columns=["a", "a"])
+    with pytest.raises(ValueError, match="duplicate"):
+        df_to_json(df)
+
+
+# --- group_and_aggregate ----------------------------------------------------
+
+def test_group_and_aggregate_missing_value_column():
+    with pytest.raises(ValueError, match="nope"):
+        group_and_aggregate(pd.DataFrame({"g": ["a"]}), "g", {"nope": "sum"})
+
+
+def test_group_and_aggregate_invalid_function():
+    # Was an AttributeError naming SeriesGroupBy, which reads as an internal fault.
+    with pytest.raises(ValueError, match="Invalid aggregation"):
+        group_and_aggregate(pd.DataFrame({"g": ["a"], "n": [1]}), "g", {"n": "totalise"})
+
+
+def test_sort_rows_missing_column():
+    with pytest.raises(ValueError, match="nope"):
+        sort_rows(pd.DataFrame({"a": [1]}), ["nope"])
+
+
+# --- correlation_matrix -----------------------------------------------------
+
+def test_correlation_matrix_zero_variance_is_json_safe():
+    df = pd.DataFrame({"a": [1, 2, 3], "const": [5, 5, 5]})
+    corr = correlation_matrix(df)
+    assert corr["a"]["const"] is None
+    assert "NaN" not in json.dumps(corr)
+
+
+def test_correlation_matrix_still_correlates():
+    df = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [3.0, 2.0, 1.0]})
+    assert correlation_matrix(df)["a"]["b"] == pytest.approx(-1.0)
+
+
+# --- ingest -----------------------------------------------------------------
+
+def test_read_txt_sniffs_tab_delimiter(tmp_path):
+    # Both branches of the old ternary read comma-separated data, so a
+    # tab-separated file came back as one column.
+    path = tmp_path / "t.txt"
+    path.write_text("a\tb\n1\t2")
+    df = read_txt(str(path))
+    assert list(df.columns) == ["a", "b"]
+
+
+def test_read_txt_honours_explicit_delimiter(tmp_path):
+    path = tmp_path / "t.txt"
+    path.write_text("a;b\n1;2")
+    assert list(read_txt(str(path), delimiter=";").columns) == ["a", "b"]
+
+
+def test_read_json_flat_object(tmp_path):
+    # pd.read_json rejects a single JSON object of scalars.
+    path = tmp_path / "one.json"
+    path.write_text('{"a": 1, "b": 2}')
+    df = read_json(str(path))
+    assert df.to_dict("records") == [{"a": 1, "b": 2}]
+
+
+def test_read_json_list_of_objects_still_works(tmp_path):
+    path = tmp_path / "many.json"
+    path.write_text('[{"a": 1}, {"a": 2}]')
+    assert len(read_json(str(path))) == 2
+
+
+# --- interface parity -------------------------------------------------------
+
+def test_ingest_endpoint_accepts_txt():
+    response = client.post("/ingest", files={"file": ("x.txt", b"a\tb\n1\t2", "text/plain")})
+    assert response.status_code == 200
+    assert response.json()["columns"] == ["a", "b"]
+
+
+def test_ingest_endpoint_handles_extensionless_filename():
+    response = client.post("/ingest", files={"file": ("myexport", b"a,b\n1,2", "text/csv")})
+    assert response.status_code == 400
+    assert "Supported" in response.json()["detail"]
+
+
+def test_transform_pivot_over_http_keeps_index():
+    response = client.post("/transform", json={
+        "data": [{"row": "a", "col": "x", "v": 1}, {"row": "b", "col": "x", "v": 3}],
+        "operation": "pivot",
+        "params": {"index": "row", "columns": "col", "values": "v"},
+    })
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"row": "a", "x": 1.0}, {"row": "b", "x": 3.0}]
+
+
+async def test_mcp_clean_data_offers_outlier_removal():
+    from dataprocessing import mcp_server
+
+    rows = [{"a": v} for v in [1.0, 2.0, 3.0, 4.0, 1000.0]]
+    kept = await mcp_server.mcp.call_tool("clean_data", {"data": rows})
+    dropped = await mcp_server.mcp.call_tool(
+        "clean_data", {"data": rows, "remove_outlier_rows": True}
+    )
+    assert kept[1]["result"]["rows"] == 5
+    assert dropped[1]["result"]["rows"] == 4
+
+
+# ===========================================================================
+# merge exposed on both interfaces
+# ===========================================================================
+
+LEFT_ROWS = [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c"}]
+RIGHT_ROWS = [{"id": 1, "score": 10}, {"id": 2, "score": 20}, {"id": 4, "score": 40}]
+
+
+def test_merge_endpoint_inner_join():
+    response = client.post("/merge", json={
+        "left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "id",
+    })
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"] == [
+        {"id": 1, "name": "a", "score": 10},
+        {"id": 2, "name": "b", "score": 20},
+    ]
+    assert body["left_rows"] == 3 and body["right_rows"] == 3 and body["rows"] == 2
+
+
+def test_merge_endpoint_reports_row_counts_for_fan_out():
+    # The counts are the point: they make silent inflation visible.
+    rows = [{"k": 1}, {"k": 1}]
+    body = client.post("/merge", json={"left": rows, "right": rows, "on": "k"}).json()
+    assert body["left_rows"] == 2 and body["right_rows"] == 2 and body["rows"] == 4
+
+
+def test_merge_endpoint_validate_rejects_fan_out():
+    rows = [{"k": 1}, {"k": 1}]
+    response = client.post("/merge", json={
+        "left": rows, "right": rows, "on": "k", "validate": "one_to_one",
+    })
+    assert response.status_code == 400
+
+
+def test_merge_endpoint_missing_key_is_client_error():
+    response = client.post("/merge", json={
+        "left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "nope",
+    })
+    assert response.status_code == 400
+    assert "left frame" in response.json()["detail"]
+
+
+def test_merge_endpoint_bad_how_is_client_error():
+    response = client.post("/merge", json={
+        "left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "id", "how": "sideways",
+    })
+    assert response.status_code == 400
+
+
+def test_merge_endpoint_cross_join():
+    response = client.post("/merge", json={
+        "left": LEFT_ROWS, "right": RIGHT_ROWS, "how": "cross",
+    })
+    assert response.status_code == 200
+    assert response.json()["rows"] == 9
+
+
+def test_merge_endpoint_custom_suffixes():
+    body = client.post("/merge", json={
+        "left": [{"k": 1, "v": "l"}], "right": [{"k": 1, "v": "r"}],
+        "on": "k", "suffixes": ["_left", "_right"],
+    }).json()
+    assert "v_left" in body["columns"] and "v_right" in body["columns"]
+
+
+def test_merge_endpoint_rejects_bad_suffixes():
+    response = client.post("/merge", json={
+        "left": [{"k": 1}], "right": [{"k": 1}], "on": "k", "suffixes": ["only_one"],
+    })
+    assert response.status_code == 400
+
+
+def test_merge_endpoint_outer_join_nulls_are_json_null():
+    body = client.post("/merge", json={
+        "left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "id", "how": "outer",
+    }).json()
+    assert body["rows"] == 4
+    assert "NaN" not in json.dumps(body["data"])
+
+
+async def test_mcp_merge_data_joins():
+    from dataprocessing import mcp_server
+
+    result = await mcp_server.mcp.call_tool(
+        "merge_data", {"left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "id"}
+    )
+    payload = result[1]["result"]
+    assert payload["rows"] == 2
+    assert payload["left_rows"] == 3 and payload["right_rows"] == 3
+
+
+async def test_mcp_merge_data_validate_rejects_fan_out():
+    from dataprocessing import mcp_server
+
+    rows = [{"k": 1}, {"k": 1}]
+    with pytest.raises(Exception):
+        await mcp_server.mcp.call_tool(
+            "merge_data",
+            {"left": rows, "right": rows, "on": "k", "validate": "one_to_one"},
+        )
+
+
+async def test_mcp_merge_data_is_registered():
+    from dataprocessing import mcp_server
+
+    names = [t.name for t in await mcp_server.mcp.list_tools()]
+    assert "merge_data" in names
+
+
+# ===========================================================================
+# Pre-release hardening: version sourcing and visible data loss
+# ===========================================================================
+
+def test_version_is_single_sourced():
+    # /health reported 0.1.0 for the whole of 0.1.1 because the number was
+    # written in both pyproject.toml and api.py. It is now read from the
+    # installed package metadata, so it cannot drift again.
+    import dataprocessing
+    from importlib.metadata import version
+
+    assert dataprocessing.__version__ == version("dataprocessing-ai")
+    assert client.get("/health").json()["version"] == dataprocessing.__version__
+
+
+def test_clean_endpoint_reports_input_size():
+    # Cleaning drops every row holding any null; without the input size the
+    # caller cannot see how much of the dataset went.
+    rows = [{"a": 1, "b": 1}, {"a": 2, "b": None}, {"a": 3, "b": 3}]
+    body = client.post("/clean", json={"data": rows}).json()
+    assert body["rows_in"] == 3 and body["rows"] == 2
+    assert body["columns_in"] == 2
+
+
+def test_clean_endpoint_reports_dropped_columns():
+    rows = [{"keep": 1, "mostly_null": 1}, {"keep": 2, "mostly_null": None},
+            {"keep": 3, "mostly_null": None}, {"keep": 4, "mostly_null": None}]
+    body = client.post("/clean", json={"data": rows}).json()
+    assert body["columns_in"] == 2 and body["columns"] == ["keep"]
+
+
+async def test_mcp_clean_data_reports_input_size():
+    from dataprocessing import mcp_server
+
+    rows = [{"a": 1, "b": 1}, {"a": 2, "b": None}, {"a": 3, "b": 3}]
+    result = await mcp_server.mcp.call_tool("clean_data", {"data": rows})
+    payload = result[1]["result"]
+    assert payload["rows_in"] == 3 and payload["rows"] == 2
+
+
+def test_clean_all_outlier_removal_is_optional():
+    # Dropping outliers is a judgement, not a repair — the extreme value is
+    # sometimes the observation that matters. Default is unchanged.
+    df = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0, 1000.0]})
+    assert len(clean_all(df)) == 4
+    assert len(clean_all(df, remove_outlier_rows=False)) == 5
