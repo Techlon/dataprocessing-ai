@@ -12,7 +12,9 @@ import io
 import json
 
 from dataprocessing import __version__
-from dataprocessing._defaults import DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD
+from dataprocessing._defaults import (
+    DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
+)
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.clean import (
     drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
@@ -40,6 +42,10 @@ app.add_middleware(
 class CleanRequest(BaseModel):
     data: List[Dict[str, Any]]
     drop_null_threshold: float = DEFAULT_NULL_THRESHOLD
+    # Share of a row that may be null before the row is dropped. 0.0 (any null
+    # drops the row) is the historical behaviour and costs about a quarter of
+    # the rows on data with 5% of cells missing; 1.0 keeps every row.
+    row_null_threshold: float = DEFAULT_ROW_NULL_THRESHOLD
     remove_outliers: bool = False
     # The multiplier on the IQR that sets the outlier fence. Only consulted
     # when remove_outliers is true; 3.0 removes fewer rows than the 1.5 default.
@@ -109,7 +115,8 @@ def clean(req: CleanRequest):
     try:
         df = pd.DataFrame(req.data)
         rows_in, columns_in = len(df), len(df.columns)
-        df = drop_nulls(df, threshold=req.drop_null_threshold)
+        df = drop_nulls(df, threshold=req.drop_null_threshold,
+                        row_threshold=req.row_null_threshold)
         df = remove_duplicates(df)
         # The request model has always offered this flag; it was declared and
         # then ignored, so callers asking for outlier removal silently got none.

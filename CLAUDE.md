@@ -33,7 +33,7 @@ dataprocessing/
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 163 tests, must stay green
+tests/          pytest suite — 176 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -126,12 +126,16 @@ run, and keep the review/verification role.
   into two modules that could drift into disagreeing about what an outlier is.
 - **Validate a share as a share.** Passing `50` for "50%" was silently accepted
   and did nothing, because no column is 5000% null. `check_share` rejects it.
+- **`dropna()` is not a neutral default.** Dropping a row for a single null
+  discards about a quarter of a frame with 5% of cells missing. `drop_nulls`
+  governs rows and columns by the same "share exceeds threshold" rule; reach for
+  `row_threshold=1.0` or a `subset` before accepting that loss.
 
 ## Testing
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 163 passed
+pytest -q                  # expect: 176 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"

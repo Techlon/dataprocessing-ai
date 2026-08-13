@@ -9,7 +9,9 @@ import json
 import io
 import base64
 
-from dataprocessing._defaults import DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD
+from dataprocessing._defaults import (
+    DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
+)
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.ingest import read_file
 from dataprocessing.clean import (
@@ -47,6 +49,7 @@ def ingest_file(file_path: str) -> Dict[str, Any]:
 def clean_data(
     data: List[Dict[str, Any]],
     drop_null_threshold: float = DEFAULT_NULL_THRESHOLD,
+    row_null_threshold: float = DEFAULT_ROW_NULL_THRESHOLD,
     remove_dupes: bool = True,
     standardise_cols: bool = True,
     remove_outlier_rows: bool = False,
@@ -57,6 +60,11 @@ def clean_data(
     Args:
         data: List of row dicts (from ingest_file or any source)
         drop_null_threshold: Drop columns with more than this fraction of nulls (0.0-1.0)
+        row_null_threshold: Drop ROWS with more than this fraction of nulls.
+                        0.0 (the default) drops a row for a single null and
+                        typically discards a quarter of a dataset with 5% of
+                        cells missing. Raise it to keep patchy rows; 1.0 keeps
+                        every row and drops only dead columns
         remove_dupes: Whether to remove duplicate rows
         standardise_cols: Whether to lowercase and underscore column names
         remove_outlier_rows: Whether to drop rows holding an IQR outlier
@@ -71,7 +79,8 @@ def clean_data(
     """
     df = pd.DataFrame(data)
     rows_in, columns_in = len(df), len(df.columns)
-    df = drop_nulls(df, threshold=drop_null_threshold)
+    df = drop_nulls(df, threshold=drop_null_threshold,
+                    row_threshold=row_null_threshold)
     if remove_dupes:
         df = remove_duplicates(df)
     # Parity with the REST /clean endpoint, which offers the same option.

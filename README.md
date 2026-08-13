@@ -127,11 +127,27 @@ curl -X POST http://localhost:8000/merge -H "Content-Type: application/json" -d 
 alongside `rows` and `columns` so you can see how much was removed. A bad column
 name or malformed `params` returns 400; only genuine server faults return 500.
 
-**Cleaning is lossier than it looks.** Dropping nulls removes every row
-containing any null, so a dataset with 5% of its cells missing loses roughly a
-quarter of its rows. Compare `rows` against `rows_in` before trusting a cleaned
-result, and raise `drop_null_threshold` or clean column-by-column if the loss is
-unacceptable.
+**Cleaning is lossier than it looks, and that is adjustable.** By default a row
+is dropped for a single null anywhere in it, so a dataset with 5% of its cells
+missing loses roughly a quarter of its rows. Compare `rows` against `rows_in` to
+see it happen, and use `row_null_threshold` to change the policy:
+
+| `row_null_threshold` | Effect |
+|---|---|
+| `0.0` (default) | Drop a row for any null. Lossy. |
+| `0.5` | Drop rows more than half empty; keep merely patchy ones. |
+| `1.0` | Keep every row. Drops dead columns and nothing else. |
+
+In Python the same control is `drop_nulls(df, row_threshold=...)`, which also
+takes `subset=[...]` to judge rows only on the columns you name — so a row
+survives a null in a column you do not care about:
+
+```python
+drop_nulls(df, row_threshold=1.0)          # drop dead columns only
+drop_nulls(df, row_threshold=0.5)          # tolerate patchy rows
+drop_nulls(df, subset=["id", "date"])      # require the key fields only
+clean_all(df, row_null_threshold=0.5)      # same dial, from the top level
+```
 
 ## Behaviour worth knowing
 

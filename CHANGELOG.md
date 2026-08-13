@@ -129,6 +129,19 @@ volume of corrected behaviour is substantive.
   and on `clean_all` (as `type_threshold`), exported as
   `DEFAULT_TYPE_THRESHOLD`, and validated: a value outside 0–1 raises rather
   than silently doing nothing, since passing `90` for 90% is the obvious slip.
+- **`drop_nulls` no longer forces the all-or-nothing row policy.** It did two
+  things with two very different levels of control: dropping mostly-null
+  *columns* was governed by a threshold, while dropping *rows* was a bare
+  `dropna()` — any single null anywhere discarded the whole row, with no way to
+  change it. That is the lossiest behaviour in the library: on a frame with 5%
+  of its cells missing at random it throws away about a quarter of the rows,
+  because a row only has to be unlucky once. Both steps now work the same way,
+  dropping when the null share *exceeds* a threshold: `row_threshold=0.0` is the
+  previous behaviour and remains the default, `0.5` keeps merely patchy rows,
+  and `1.0` keeps every row and drops only dead columns. A `subset` argument
+  judges rows on named columns alone, so a row survives a null in a column that
+  does not matter. Exposed as `row_null_threshold` on `clean_all`, `/clean` and
+  the MCP `clean_data` tool.
 - **The outlier fence is adjustable, and defined once.** The `1.5 × IQR`
   multiplier was written into both `clean.remove_outliers` and
   `analyse.detect_outliers`, so the two could drift apart and disagree about
@@ -191,7 +204,7 @@ volume of corrected behaviour is substantive.
 
 ### Tests
 
-62 → 163. The new tests are regressions for the above, plus coverage of the two
+62 → 176. The new tests are regressions for the above, plus coverage of the two
 merge interfaces; two existing tests were corrected where they asserted the old
 wrong behaviour.
 

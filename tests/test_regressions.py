@@ -856,3 +856,103 @@ async def test_mcp_clean_data_accepts_outlier_factor():
         "clean_data", {"data": rows, "remove_outlier_rows": True, "outlier_factor": 3.0})
     assert tight[1]["result"]["rows"] == 5
     assert wide[1]["result"]["rows"] == 6
+
+
+# ===========================================================================
+# drop_nulls: the row policy is adjustable, not just the column policy
+# ===========================================================================
+
+# Two clean rows, one patchy (1 of 3 null), one mostly empty (2 of 3). Sized so
+# that no COLUMN exceeds the 0.5 column threshold — b is exactly 0.5 null, which
+# does not exceed it — so these tests isolate the row policy from the column one.
+PATCHY = pd.DataFrame({
+    "a": [1.0, 2.0, None, 4.0],
+    "b": [1.0, None, None, 4.0],
+    "c": [1.0, 3.0, 4.0, 5.0],
+})
+
+
+def test_drop_nulls_default_is_unchanged():
+    # Any null drops the row — what dropna() does and what this always did.
+    assert len(drop_nulls(PATCHY)) == 2
+
+
+def test_drop_nulls_keeps_every_column_in_the_fixture():
+    # Guards the tests above: if b ever tripped the column threshold, the row
+    # assertions would be measuring the wrong thing.
+    assert list(drop_nulls(PATCHY, row_threshold=1.0).columns) == ["a", "b", "c"]
+
+
+def test_drop_nulls_can_keep_every_row():
+    # A fully-null row has a share of 1.0, which does not exceed 1.0.
+    assert len(drop_nulls(PATCHY, row_threshold=1.0)) == 4
+
+
+def test_drop_nulls_row_threshold_keeps_patchy_rows():
+    # Row 1 is 1/3 null (kept), row 2 is 2/3 null (dropped).
+    kept = drop_nulls(PATCHY, row_threshold=0.5)
+    assert kept.index.tolist() == [0, 1, 3]
+
+
+def test_drop_nulls_subset_judges_only_named_columns():
+    # Row 2 is null in 'a' but fine in 'c'. Judging on 'c' alone keeps all rows.
+    assert len(drop_nulls(PATCHY, subset=["c"])) == 4
+    assert len(drop_nulls(PATCHY, subset=["a"])) == 3
+
+
+def test_drop_nulls_subset_missing_column_raises():
+    with pytest.raises(ValueError, match="Column"):
+        drop_nulls(PATCHY, subset=["nope"])
+
+
+def test_drop_nulls_subset_survives_its_column_being_dropped():
+    # 'gone' is 100% null so the column goes; judging rows on it must not crash.
+    df = pd.DataFrame({"keep": [1.0, 2.0], "gone": [None, None]})
+    result = drop_nulls(df, subset=["gone"])
+    assert list(result.columns) == ["keep"]
+    assert len(result) == 2
+
+
+def test_drop_nulls_still_drops_mostly_null_columns():
+    df = pd.DataFrame({"keep": [1, 2, 3, 4], "mostly_null": [1.0, None, None, None]})
+    assert "mostly_null" not in drop_nulls(df, row_threshold=1.0).columns
+
+
+def test_drop_nulls_validates_row_threshold():
+    with pytest.raises(ValueError, match="row_threshold"):
+        drop_nulls(PATCHY, row_threshold=50)
+
+
+def test_row_threshold_rescues_the_scattered_null_case():
+    # The scenario that motivated this: 5% of cells missing at random costs a
+    # quarter of the rows at the default, and none of them once it is raised.
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame({f"c{i}": rng.normal(size=1000) for i in range(6)})
+    df = df.mask(rng.random(df.shape) < 0.05)
+
+    assert len(drop_nulls(df)) < 800                      # default is lossy
+    assert len(drop_nulls(df, row_threshold=1.0)) == 1000  # nothing dropped
+
+
+def test_clean_all_passes_the_row_threshold_through():
+    assert len(clean_all(PATCHY, remove_outlier_rows=False)) == 2
+    assert len(clean_all(PATCHY, remove_outlier_rows=False, row_null_threshold=1.0)) == 4
+
+
+def test_clean_endpoint_accepts_row_null_threshold():
+    rows = [{"a": 1.0, "b": 1.0}, {"a": 2.0, "b": None}]
+    strict = client.post("/clean", json={"data": rows}).json()
+    lenient = client.post("/clean", json={"data": rows, "row_null_threshold": 1.0}).json()
+    assert strict["rows"] == 1 and strict["rows_in"] == 2
+    assert lenient["rows"] == 2
+
+
+async def test_mcp_clean_data_accepts_row_null_threshold():
+    from dataprocessing import mcp_server
+
+    rows = [{"a": 1.0, "b": 1.0}, {"a": 2.0, "b": None}]
+    strict = await mcp_server.mcp.call_tool("clean_data", {"data": rows})
+    lenient = await mcp_server.mcp.call_tool(
+        "clean_data", {"data": rows, "row_null_threshold": 1.0})
+    assert strict[1]["result"]["rows"] == 1
+    assert lenient[1]["result"]["rows"] == 2

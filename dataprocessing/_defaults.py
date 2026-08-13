@@ -12,6 +12,11 @@ choices; every one is overridable at the call site.
 DEFAULT_NULL_THRESHOLD = 0.5
 """Share of a column that may be null before the column itself is dropped."""
 
+DEFAULT_ROW_NULL_THRESHOLD = 0.0
+"""Share of a row that may be null before the row is dropped. 0.0 means a single
+null anywhere drops the row, which is what `dropna()` does and is far lossier
+than it sounds — 5% of cells missing costs roughly a quarter of the rows."""
+
 DEFAULT_TYPE_THRESHOLD = 0.9
 """Share of a column's non-null values that must convert for a type change to
 be accepted. See `clean.fix_types`."""

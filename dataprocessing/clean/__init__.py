@@ -5,19 +5,60 @@ import numpy as np
 from typing import Optional
 
 from dataprocessing._defaults import (
-    DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_TYPE_THRESHOLD,
-    check_positive, check_share,
+    DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
+    DEFAULT_TYPE_THRESHOLD, check_positive, check_share,
 )
 
 
-def drop_nulls(df, threshold=DEFAULT_NULL_THRESHOLD):
-    """Drop columns whose null share exceeds `threshold`, then drop null rows.
+def drop_nulls(df, threshold=DEFAULT_NULL_THRESHOLD,
+               row_threshold=DEFAULT_ROW_NULL_THRESHOLD, subset=None):
+    """Drop mostly-null columns, then rows with too many nulls of their own.
+
+    Both steps are governed the same way — something is dropped when its share
+    of nulls *exceeds* the threshold:
+
+    - `threshold` (0.5) applies down a column: drop a column more than half null.
+    - `row_threshold` (0.0) applies across a row: at 0.0 any single null drops
+      the row, which is what `dropna()` does and what this function always did.
+
+    That row default is the lossiest thing in the library and, until now, the
+    only part of it that could not be adjusted. On a frame with 5% of its cells
+    missing at random it discards roughly a quarter of the rows, because a row
+    only has to be unlucky once. Useful alternatives:
+
+    - `row_threshold=1.0` keeps every row; a fully-null row has a share of 1.0,
+      which does not exceed 1.0. Use this to drop dead columns and nothing else.
+    - `row_threshold=0.5` drops rows that are more than half empty, keeping the
+      merely patchy ones.
+    - `subset=[...]` judges rows only on the columns you name, so a row survives
+      a null in a column you do not care about. Use it to require the key fields
+      and tolerate gaps elsewhere.
 
     Returns a new frame; the caller's DataFrame is left untouched.
     """
     check_share(threshold)
+    check_share(row_threshold, name="row_threshold")
+
+    if subset is not None:
+        missing = [c for c in subset if c not in df.columns]
+        if missing:
+            raise ValueError(f"Column(s) not found: {missing}")
+
     cols_to_drop = df.columns[df.isnull().mean() > threshold]
-    return df.drop(columns=cols_to_drop).dropna()
+    result = df.drop(columns=cols_to_drop)
+
+    if subset is None:
+        considered = result
+    else:
+        # A subset column may itself have just been dropped for being mostly
+        # null. Judge rows on what actually survived rather than raising here.
+        considered = result[[c for c in subset if c in result.columns]]
+
+    if considered.shape[1] == 0:
+        return result
+
+    row_null_share = considered.isnull().mean(axis=1)
+    return result[row_null_share <= row_threshold]
 
 
 def _try_convert(series, threshold=DEFAULT_TYPE_THRESHOLD):
@@ -140,6 +181,7 @@ def standardise_columns(df):
 
 
 def clean_all(df, remove_outlier_rows=True, null_threshold=DEFAULT_NULL_THRESHOLD,
+              row_null_threshold=DEFAULT_ROW_NULL_THRESHOLD,
               type_threshold=DEFAULT_TYPE_THRESHOLD,
               outlier_factor=DEFAULT_IQR_FACTOR):
     """Run the full cleaning pipeline.
@@ -158,6 +200,8 @@ def clean_all(df, remove_outlier_rows=True, null_threshold=DEFAULT_NULL_THRESHOL
     different things and a single `threshold` argument would be ambiguous:
 
     - `null_threshold` — share of nulls above which a column is dropped (0.5)
+    - `row_null_threshold` — share of nulls above which a *row* is dropped
+      (0.0, meaning any null at all; raise it to keep patchy rows)
     - `type_threshold` — share of values that must convert before a column's
       type is changed, see `fix_types` (0.9)
     - `outlier_factor` — multiplier on the IQR that sets the outlier fence,
@@ -166,7 +210,7 @@ def clean_all(df, remove_outlier_rows=True, null_threshold=DEFAULT_NULL_THRESHOL
     All keep the defaults of earlier releases, so calling `clean_all(df)`
     behaves exactly as before.
     """
-    df = drop_nulls(df, threshold=null_threshold)
+    df = drop_nulls(df, threshold=null_threshold, row_threshold=row_null_threshold)
     df = fix_types(df, threshold=type_threshold)
     df = remove_duplicates(df)
     if remove_outlier_rows:
