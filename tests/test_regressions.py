@@ -25,6 +25,19 @@ from dataprocessing.visualise import correlation_heatmap, histogram, line_chart
 client = TestClient(app)
 
 
+def tool_result(raw):
+    """Return a tool's payload, whichever mcp major produced it.
+
+    mcp 1.x returns (content, {"result": ...}) from call_tool; mcp 2.0 returns a
+    CallToolResult whose .structured_content holds the same inner shape. The
+    package supports both, so the tests must not assume either.
+    """
+    if hasattr(raw, "structured_content"):  # mcp >= 2.0
+        return raw.structured_content["result"]
+    return raw[1]["result"]  # mcp 1.x
+
+
+
 # --- clean: fix_types destroyed text columns -------------------------------
 
 def test_fix_types_preserves_text_columns():
@@ -274,7 +287,7 @@ async def test_mcp_analyse_data_returns_serialisable_result():
     result = await mcp_server.mcp.call_tool(
         "analyse_data", {"data": [{"age": 23}, {"age": 35}, {"age": 42}]}
     )
-    assert "summary_stats" in result[1]["result"]
+    assert "summary_stats" in tool_result(result)
 
 
 async def test_mcp_visualise_data_returns_serialisable_result():
@@ -285,7 +298,7 @@ async def test_mcp_visualise_data_returns_serialisable_result():
         {"data": [{"city": "A"}, {"city": "A"}, {"city": "B"}],
          "chart": "bar_chart", "params": {"column": "city"}},
     )
-    json.dumps(result[1]["result"])
+    json.dumps(tool_result(result))
 
 
 async def test_mcp_transform_exposes_pivot():
@@ -298,7 +311,7 @@ async def test_mcp_transform_exposes_pivot():
          "operation": "pivot",
          "params": {"index": "city", "columns": "q", "values": "n"}},
     )
-    assert result[1]["result"]["rows"] == 2
+    assert tool_result(result)["rows"] == 2
 
 
 async def test_mcp_group_and_aggregate_keeps_keys():
@@ -310,7 +323,7 @@ async def test_mcp_group_and_aggregate_keeps_keys():
          "operation": "group_and_aggregate",
          "params": {"group_by": "city", "aggregations": {"n": "sum"}}},
     )
-    assert result[1]["result"]["data"] == [{"city": "A", "n": 3}, {"city": "B", "n": 3}]
+    assert tool_result(result)["data"] == [{"city": "A", "n": 3}, {"city": "B", "n": 3}]
 
 
 # ===========================================================================
@@ -535,8 +548,8 @@ async def test_mcp_clean_data_offers_outlier_removal():
     dropped = await mcp_server.mcp.call_tool(
         "clean_data", {"data": rows, "remove_outlier_rows": True}
     )
-    assert kept[1]["result"]["rows"] == 5
-    assert dropped[1]["result"]["rows"] == 4
+    assert tool_result(kept)["rows"] == 5
+    assert tool_result(dropped)["rows"] == 4
 
 
 # ===========================================================================
@@ -627,7 +640,7 @@ async def test_mcp_merge_data_joins():
     result = await mcp_server.mcp.call_tool(
         "merge_data", {"left": LEFT_ROWS, "right": RIGHT_ROWS, "on": "id"}
     )
-    payload = result[1]["result"]
+    payload = tool_result(result)
     assert payload["rows"] == 2
     assert payload["left_rows"] == 3 and payload["right_rows"] == 3
 
@@ -686,7 +699,7 @@ async def test_mcp_clean_data_reports_input_size():
 
     rows = [{"a": 1, "b": 1}, {"a": 2, "b": None}, {"a": 3, "b": 3}]
     result = await mcp_server.mcp.call_tool("clean_data", {"data": rows})
-    payload = result[1]["result"]
+    payload = tool_result(result)
     assert payload["rows_in"] == 3 and payload["rows"] == 2
 
 
@@ -854,8 +867,8 @@ async def test_mcp_clean_data_accepts_outlier_factor():
         "clean_data", {"data": rows, "remove_outlier_rows": True})
     wide = await mcp_server.mcp.call_tool(
         "clean_data", {"data": rows, "remove_outlier_rows": True, "outlier_factor": 3.0})
-    assert tight[1]["result"]["rows"] == 5
-    assert wide[1]["result"]["rows"] == 6
+    assert tool_result(tight)["rows"] == 5
+    assert tool_result(wide)["rows"] == 6
 
 
 # ===========================================================================
@@ -954,8 +967,8 @@ async def test_mcp_clean_data_accepts_row_null_threshold():
     strict = await mcp_server.mcp.call_tool("clean_data", {"data": rows})
     lenient = await mcp_server.mcp.call_tool(
         "clean_data", {"data": rows, "row_null_threshold": 1.0})
-    assert strict[1]["result"]["rows"] == 1
-    assert lenient[1]["result"]["rows"] == 2
+    assert tool_result(strict)["rows"] == 1
+    assert tool_result(lenient)["rows"] == 2
 
 
 # ===========================================================================

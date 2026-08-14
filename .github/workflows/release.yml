@@ -1,0 +1,76 @@
+name: Release
+
+# Publishes to PyPI via Trusted Publishing (OpenID Connect). PyPI is configured
+# to trust this specific workflow in this specific repository, so no API token
+# exists anywhere — nothing to store in a secret, leak, or rotate. See
+# RELEASING.md for the one-time PyPI setup.
+#
+# Triggered by pushing a version tag, so the published artefact always
+# corresponds to a tagged commit.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      testpypi:
+        description: "Publish to TestPyPI instead of PyPI"
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+
+      - name: Refuse to publish if the tag and the package version disagree
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          # A PyPI version can never be reused, so a mismatch here is worth
+          # failing on rather than discovering after an irreversible upload.
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "tag=$tag package=$pkg"
+          [ "$tag" = "$pkg" ] || { echo "::error::tag $tag != version $pkg"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -7,7 +7,11 @@ name = "dataprocessing-ai"
 version = "0.2.0"
 description = "AI-native data processing library — REST API, MCP server, and Python package"
 readme = "README.md"
-requires-python = ">=3.9"
+# Every optional interface needs 3.10: mcp, fastapi and uvicorn all declare
+# >=3.10, so a 3.9 user could install the bare core but none of the three
+# interfaces this library exists to provide. Claiming 3.9 was misleading and
+# untestable; CI covers 3.10 through 3.13.
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
   {name = "oluwagbemilesi"}
@@ -20,7 +24,6 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -46,11 +49,10 @@ api = [
     "python-multipart>=0.0.9",
 ]
 mcp = [
-    # Upper bound is load-bearing: mcp 2.0.0 removed mcp.server.fastmcp
-    # (FastMCP became MCPServer), so an unbounded install resolves to 2.x and
-    # the MCP server fails at import. Verified present in 1.2.0 through 1.29.0.
-    # Lifting this bound means porting mcp_server.py to the 2.x API.
-    "mcp>=1.2.0,<2.0.0",
+    # mcp 2.0 renamed FastMCP to MCPServer and moved it; mcp_server.py imports
+    # whichever is present, and the suite is run against 1.27.2 and 2.0.0 in CI.
+    # The bound stops at the next major, which has not been tested against.
+    "mcp>=1.2.0,<3.0.0",
 ]
 formats = [
     "openpyxl>=3.1.0",

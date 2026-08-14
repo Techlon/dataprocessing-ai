@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a dependency's breaking release is found by the schedule
+    # rather than by a user. mcp 2.0 removed the API this package builds on and
+    # nothing noticed until an install was tried by hand months later.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  floor:
+    # The oldest versions the package claims to support. Without this the
+    # declared floor is a guess: the repo venv holds whatever was resolved
+    # months ago, which is how the mcp break stayed invisible.
+    name: oldest supported dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install -e ".[dev]"
+      - name: Pin every runtime dependency to its declared minimum
+        run: |
+          pip install \
+            "pandas==2.2.0" "numpy==1.26.4" "mcp==1.2.0" \
+            "fastapi==0.110.0" "uvicorn==0.27.0" "pydantic==2.6.0" \
+            "python-multipart==0.0.9" "openpyxl==3.1.0" "pyarrow==15.0.0"
+      - run: pip list
+      - run: pytest -q
+
+  mcp-majors:
+    # mcp_server.py imports FastMCP (1.x) or MCPServer (2.x), whichever is
+    # present. Both paths are exercised so the shim cannot rot unnoticed.
+    name: mcp ${{ matrix.mcp-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mcp-version: ["1.27.2", "2.0.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pip install "mcp==${{ matrix.mcp-version }}"
+      - name: Show which server class resolved
+        run: |
+          python -c "from dataprocessing.mcp_server import _Server; \
+                     print(_Server.__module__ + '.' + _Server.__name__)"
+      - run: pytest -q
+
+  unbounded:
+    # Installs with the upper bounds stripped, so the next breaking major shows
+    # up here first. Allowed to fail: it is an early warning, not a gate.
+    name: latest dependencies (early warning)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - name: Upgrade past the declared upper bounds
+        run: pip install --upgrade pandas numpy mcp fastapi uvicorn pydantic
+      - run: pip list
+      - run: pytest -q
+
+  package:
+    name: build and install the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - name: Install the built wheel and import it from outside the repo
+        run: |
+          # Outside the source tree on purpose: with the repo as cwd, `import
+          # dataprocessing` picks up local source and proves nothing about the
+          # wheel. This step caught exactly that mistake during development.
+          pip install "$(ls dist/*.whl)[all]"
+          cd /tmp
+          python -c "import dataprocessing; print(dataprocessing.__file__, dataprocessing.__version__)"
+          python -c "from dataprocessing.api import app; print(app.title)"
+          python -c "from dataprocessing import mcp_server; print('mcp server imports')"
+          which dataprocessing-mcp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

@@ -11,6 +11,27 @@ volume of corrected behaviour is substantive.
 
 ### Release engineering
 
+- **CI runs the suite across Python 3.10–3.13, both mcp majors, and the oldest
+  supported dependency set.** There was no CI at all, which is why a broken
+  `pip install "dataprocessing-ai[mcp]"` went unnoticed: the repo's virtualenv
+  held versions resolved months earlier, so the tests passed while a new user's
+  install could not import the server. A weekly scheduled job installs with the
+  upper bounds stripped, so the next breaking major surfaces there rather than
+  in someone's project.
+- **The MCP server supports mcp 1.x and 2.x.** `mcp` 2.0 renamed `FastMCP` to
+  `MCPServer` and moved it, but left the decorator, `run()` and `call_tool()`
+  surfaces unchanged, so `mcp_server.py` imports whichever is installed. The
+  extra is now `mcp>=1.2.0,<3.0.0` and the full suite is run against 1.27.2 and
+  2.0.0 in CI. `call_tool` does differ in what it returns — a tuple in 1.x, a
+  `CallToolResult` in 2.x — which the tests normalise.
+- **`requires-python` is `>=3.10`, corrected from `>=3.9`.** `mcp`, `fastapi`
+  and `uvicorn` all require 3.10, so a 3.9 user could install the bare core but
+  none of the three interfaces this library exists to provide. The old claim was
+  both misleading and untestable.
+- **Publishing runs from GitHub Actions via PyPI Trusted Publishing**, so no API
+  token exists to store or leak, and the workflow refuses to publish when the
+  git tag and the packaged version disagree. See `RELEASING.md`.
+
 - **The version is single-sourced.** It was written in both `pyproject.toml` and
   `api.py`, and `/health` consequently reported `0.1.0` for the whole of 0.1.1.
   `dataprocessing.__version__` now reads the installed package metadata, and a

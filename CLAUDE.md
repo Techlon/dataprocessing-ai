@@ -19,6 +19,8 @@ competing head-on with pandas.
 - Package name (PyPI): `dataprocessing-ai`
 - Import name (Python): `dataprocessing`  (these intentionally differ)
 - Current published version: 0.1.1 (0.2.0 prepared, see CHANGELOG.md)
+- CI: `.github/workflows/ci.yml`. Release: tag `vX.Y.Z`, see `RELEASING.md`
+- Supported: Python 3.10-3.13, pandas 2.2-3.x, mcp 1.x and 2.x (all in CI)
 
 ## Package layout
 
@@ -108,7 +110,12 @@ run, and keep the review/verification role.
   `pip install "dataprocessing-ai[mcp]"` could not import the server at all.
   Any release check must install into a clean venv, unpinned.
 - **Put upper bounds on fast-moving SDK dependencies.** `mcp>=0.9.0` was an open
-  invitation to a breaking major. The `[mcp]` extra is now `>=1.2.0,<2.0.0`.
+  invitation to a breaking major. The `[mcp]` extra is `>=1.2.0,<3.0.0`, and the
+  `unbounded` CI job installs past those bounds weekly to find the next one.
+- **`mcp_server.py` must import cleanly on mcp 1.x AND 2.x.** It picks
+  `MCPServer` (2.x) or `FastMCP` (1.x) at import. `call_tool` returns a tuple on
+  1.x and a `CallToolResult` on 2.x; tests go through the `tool_result` helper
+  rather than subscripting either shape.
 - **A silent no-op is a defect, not lenience.** `rename_columns` ignored names
   that did not exist, so a caller was told the operation succeeded while nothing
   changed — the worst outcome for an agent, which has no other way to check.

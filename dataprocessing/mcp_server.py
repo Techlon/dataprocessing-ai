@@ -2,8 +2,16 @@
 DataProcessing MCP Server
 Exposes ingest, clean, transform and analyse as native Claude tools.
 """
-from mcp.server.fastmcp import FastMCP
 from typing import Any, Dict, List, Optional
+
+try:
+    # mcp >= 2.0 renamed FastMCP to MCPServer and moved it. The decorator,
+    # run() and call_tool() surfaces are otherwise the same, so one shim covers
+    # both majors rather than stranding either. Ordered newest-first so a 2.x
+    # install does not pay for a failed legacy import.
+    from mcp.server.mcpserver import MCPServer as _Server
+except ImportError:  # pragma: no cover - depends on the installed mcp major
+    from mcp.server.fastmcp import FastMCP as _Server
 import pandas as pd
 import json
 import io
@@ -27,7 +35,7 @@ from dataprocessing.analyse import full_report
 from dataprocessing.visualise import (
     histogram, bar_chart, scatter, line_chart, correlation_heatmap)
 
-mcp = FastMCP("DataProcessing")
+mcp = _Server("DataProcessing")
 
 @mcp.tool()
 def ingest_file(file_path: str) -> Dict[str, Any]:
