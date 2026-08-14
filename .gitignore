@@ -21,5 +21,15 @@ build/
 api_generated.py
 *.bak
 
+# Local tooling for the generate-then-verify workflow. Deliberately not part of
+# the distributed package: they drive a local Ollama model that only exists on
+# the author's machine, so they are noise to anyone else reading the repo.
+generate_from_brief.py
+generate_tests.py
+
+# Working notes and handoff docs kept alongside the project, not shipped with
+# it. CLAUDE.md itself IS tracked, at the repo root where it loads as context.
+Claude/
+
 # Separate project — not part of this library
 company-agents/

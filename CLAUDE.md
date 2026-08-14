@@ -224,10 +224,14 @@ natural extension of the existing modules.
 Treat monetisation as open. MIT-licensed and open-source-first is settled; a
 hosted API is the eventual path, not a near-term one.
 
-## Housekeeping / open decisions
+## Housekeeping
 
 - `generate_from_brief.py` and `generate_tests.py` (the generation tooling) are
-  untracked by deliberate choice — decide whether they belong in the repo.
+  gitignored — settled, they stay local. They drive an Ollama model that only
+  exists on this machine, so they are noise in a public repo.
+- `Claude/` (working notes, handoff docs) is gitignored for the same reason.
+  `CLAUDE.md` itself IS tracked, at the repo root where it loads as context —
+  it used to sit in `Claude/`, where it probably was not loading at all.
 - `company-agents/` is a SEPARATE project, moved to `~/Projects/company-agents`.
   It is not part of this library. It's gitignored here in case of re-nesting.
 
