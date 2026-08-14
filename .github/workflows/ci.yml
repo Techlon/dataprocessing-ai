@@ -61,7 +61,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mcp-version: ["1.27.2", "2.0.0"]
+        # 1.2.0 is the declared floor and predates structured tool output,
+        # so call_tool returns plain content there — a third response shape.
+        mcp-version: ["1.2.0", "1.27.2", "2.0.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

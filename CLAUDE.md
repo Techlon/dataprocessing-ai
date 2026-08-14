@@ -122,9 +122,11 @@ run, and keep the review/verification role.
   invitation to a breaking major. The `[mcp]` extra is `>=1.2.0,<3.0.0`, and the
   `unbounded` CI job installs past those bounds weekly to find the next one.
 - **`mcp_server.py` must import cleanly on mcp 1.x AND 2.x.** It picks
-  `MCPServer` (2.x) or `FastMCP` (1.x) at import. `call_tool` returns a tuple on
-  1.x and a `CallToolResult` on 2.x; tests go through the `tool_result` helper
-  rather than subscripting either shape.
+  `MCPServer` (2.x) or `FastMCP` (1.x) at import. `call_tool` returns THREE
+  shapes across the supported range — `[TextContent]` on 1.2.0 (before
+  structured output existed), `(content, {"result": ...})` on later 1.x, and a
+  `CallToolResult` on 2.x. Tests go through the `tool_result` helper; never
+  subscript the raw return. All three are in the CI matrix.
 - **A silent no-op is a defect, not lenience.** `rename_columns` ignored names
   that did not exist, so a caller was told the operation succeeded while nothing
   changed — the worst outcome for an agent, which has no other way to check.

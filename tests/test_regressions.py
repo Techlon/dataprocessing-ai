@@ -26,15 +26,22 @@ client = TestClient(app)
 
 
 def tool_result(raw):
-    """Return a tool's payload, whichever mcp major produced it.
+    """Return a tool's payload, whichever mcp version produced it.
 
-    mcp 1.x returns (content, {"result": ...}) from call_tool; mcp 2.0 returns a
-    CallToolResult whose .structured_content holds the same inner shape. The
-    package supports both, so the tests must not assume either.
+    call_tool has returned three different shapes across the range this package
+    supports, and the server works on all of them — only the tests need to care:
+
+    - mcp 2.x      a CallToolResult, payload under .structured_content["result"]
+    - mcp ~1.10+   a (content, {"result": ...}) tuple
+    - mcp 1.2.0    just [TextContent]; structured output did not exist yet, so
+                   the payload is the JSON text the tool serialised to
     """
     if hasattr(raw, "structured_content"):  # mcp >= 2.0
         return raw.structured_content["result"]
-    return raw[1]["result"]  # mcp 1.x
+    if len(raw) == 2 and isinstance(raw[1], dict):  # mcp ~1.10+
+        return raw[1]["result"]
+    content = raw[0] if isinstance(raw, (list, tuple)) else raw  # mcp 1.2.0
+    return json.loads(content.text)
 
 
 
