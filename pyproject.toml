@@ -44,7 +44,8 @@ dependencies = [
 [project.optional-dependencies]
 api = [
     "fastapi>=0.110.0",
-    "uvicorn>=0.27.0",
+    # Floor set by mcp, not by this package: mcp>=1.2.0 requires uvicorn>=0.30.
+    "uvicorn>=0.30.0",
     # Floor is set by mcp, not by this package's own needs: mcp>=1.2.0 requires
     # pydantic>=2.10.1, so declaring 2.6.0 here made `[all]` and `[dev]`
     # unsatisfiable at their own stated minimums. CI's floor job found this.

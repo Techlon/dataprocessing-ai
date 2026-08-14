@@ -40,7 +40,10 @@ volume of corrected behaviour is substantive.
   `pydantic>=2.10.1`, so `pip install "dataprocessing-ai[all]"` resolved to
   nothing at the versions the package itself claimed to support. Nobody hit it
   because pip picks the newest version, not the oldest — CI's floor job found it
-  on its first run. The floor is now `pydantic>=2.10.1`.
+  on its first run, and a second conflict (`mcp` needs `uvicorn>=0.30`, the
+  extra said `>=0.27.0`) on its second. Both floors are raised, and
+  `scripts/check_dependency_floors.py` answers the question locally rather than
+  one CI round-trip per conflict.
 - **Runtime dependencies have upper bounds.** `pandas>=2.2.0,<4.0.0` and
   `numpy>=1.26.0,<3.0.0`, for the reason the `mcp` pin exists: an unbounded
   requirement lets a breaking major in silently. The suite is run against both

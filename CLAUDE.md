@@ -109,6 +109,11 @@ run, and keep the review/verification role.
   break went unnoticed — tests passed on the pinned 1.27.2 while a fresh
   `pip install "dataprocessing-ai[mcp]"` could not import the server at all.
   Any release check must install into a clean venv, unpinned.
+- **A dependency floor is an unverified claim.** pip installs the newest
+  version that fits, never the oldest, so a wrong minimum is invisible until
+  someone pins. Two of ours made `[all]` unsatisfiable at its own stated
+  versions. Run `python scripts/check_dependency_floors.py` after touching any
+  dependency; CI's `floor` job is the gate.
 - **Put upper bounds on fast-moving SDK dependencies.** `mcp>=0.9.0` was an open
   invitation to a breaking major. The `[mcp]` extra is `>=1.2.0,<3.0.0`, and the
   `unbounded` CI job installs past those bounds weekly to find the next one.
