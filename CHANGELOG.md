@@ -31,11 +31,16 @@ volume of corrected behaviour is substantive.
 - **Publishing runs from GitHub Actions via PyPI Trusted Publishing**, so no API
   token exists to store or leak, and the workflow refuses to publish when the
   git tag and the packaged version disagree. See `RELEASING.md`.
-
 - **The version is single-sourced.** It was written in both `pyproject.toml` and
   `api.py`, and `/health` consequently reported `0.1.0` for the whole of 0.1.1.
   `dataprocessing.__version__` now reads the installed package metadata, and a
   test asserts the two agree.
+- **The declared minimum dependency set is now actually installable.** The
+  `[api]` extra declared `pydantic>=2.6.0` while `mcp>=1.2.0` requires
+  `pydantic>=2.10.1`, so `pip install "dataprocessing-ai[all]"` resolved to
+  nothing at the versions the package itself claimed to support. Nobody hit it
+  because pip picks the newest version, not the oldest — CI's floor job found it
+  on its first run. The floor is now `pydantic>=2.10.1`.
 - **Runtime dependencies have upper bounds.** `pandas>=2.2.0,<4.0.0` and
   `numpy>=1.26.0,<3.0.0`, for the reason the `mcp` pin exists: an unbounded
   requirement lets a breaking major in silently. The suite is run against both
@@ -79,8 +84,8 @@ volume of corrected behaviour is substantive.
   `mcp.server.fastmcp` (FastMCP became MCPServer), so any install done after
   that release resolved to 2.x and `mcp_server.py` failed at import — breaking
   the project's flagship interface for new users of 0.1.1. The extra is now
-  `mcp>=1.2.0,<2.0.0`, verified working across 1.2.0–1.29.0. Porting to the 2.x
-  API is separate work.
+  `mcp>=1.2.0,<3.0.0` and the server imports whichever class the installed major
+  provides, so 1.x and 2.x both work.
 - **`histogram` and `distribution` no longer crash on nulls** with "autodetected
   range of [nan, nan] is not finite".
 - **`standardise_columns` no longer crashes on non-string column names**, which

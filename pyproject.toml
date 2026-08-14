@@ -45,7 +45,10 @@ dependencies = [
 api = [
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
-    "pydantic>=2.6.0",
+    # Floor is set by mcp, not by this package's own needs: mcp>=1.2.0 requires
+    # pydantic>=2.10.1, so declaring 2.6.0 here made `[all]` and `[dev]`
+    # unsatisfiable at their own stated minimums. CI's floor job found this.
+    "pydantic>=2.10.1",
     "python-multipart>=0.0.9",
 ]
 mcp = [
