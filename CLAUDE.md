@@ -109,6 +109,10 @@ run, and keep the review/verification role.
   break went unnoticed — tests passed on the pinned 1.27.2 while a fresh
   `pip install "dataprocessing-ai[mcp]"` could not import the server at all.
   Any release check must install into a clean venv, unpinned.
+- **Pin test dependencies alongside runtime ones when testing a floor.** Left
+  to float they resolve to newest, and newest-httpx against oldest-starlette is
+  a combination nobody ships — the job then fails on a mixture it never meant to
+  exercise rather than on the floor itself.
 - **A dependency floor is an unverified claim.** pip installs the newest
   version that fits, never the oldest, so a wrong minimum is invisible until
   someone pins. Two of ours made `[all]` unsatisfiable at its own stated
