@@ -6,7 +6,7 @@
 
 A realistic CRM export — trailing spaces in headers, blank cells, duplicate
 rows, numbers stored as text, one absurd value — driven through the MCP tools
-the way an agent would. Three problems the 225-test suite did not catch:
+the way an agent would. Three problems the 209-test suite did not catch:
 
 - **Grouping no longer reports a false alarm.** `group_and_aggregate` collapsing
   120 rows to 5 was warned about as a 96% row loss. Collapsing rows *is*
@@ -22,8 +22,6 @@ the way an agent would. Three problems the 225-test suite did not catch:
   freshly ingested one was a dead end: the left has `customer_id`, the right has
   `Customer ID`, and no single `on` value can bridge them. The error now names
   the way out as well.
-
-### Added — warnings
 
 ### Added
 
