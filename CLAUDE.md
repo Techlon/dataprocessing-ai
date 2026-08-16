@@ -36,7 +36,7 @@ dataprocessing/
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 209 tests, must stay green
+tests/          pytest suite — 226 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -155,11 +155,19 @@ run, and keep the review/verification role.
   governs rows and columns by the same "share exceeds threshold" rule; reach for
   `row_threshold=1.0` or a `subset` before accepting that loss.
 
+## Dogfooding
+
+Run a realistic messy dataset through the MCP tools before believing a feature
+is done. The warnings layer passed 209 tests and was still wrong in ways only
+visible from the output: a false alarm on every group-by, and a join between a
+cleaned and an uncleaned frame with no way through. Tests check what you thought
+to check; using the thing shows what you did not.
+
 ## Testing
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 209 passed
+pytest -q                  # expect: 226 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"

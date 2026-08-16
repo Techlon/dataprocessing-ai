@@ -1245,3 +1245,133 @@ def test_warnings_are_json_safe():
     body = client.post("/clean", json={"data": rows}).json()
     json.dumps(body["warnings"])
     assert all(isinstance(w, str) for w in body["warnings"])
+
+
+# ===========================================================================
+# Found by driving the MCP tools through a realistic pipeline
+# ===========================================================================
+# A messy CRM export, cleaned, grouped, filtered and joined. None of these were
+# caught by the tests; all three came from reading what the tools actually said.
+
+from dataprocessing._columns import suggest
+from dataprocessing.transform import merge_dataframes
+
+
+def test_grouping_does_not_warn_about_losing_rows():
+    # It reported "Removed 115 of 120 rows (96%)" for a group-by. Collapsing
+    # rows IS grouping, so this fired on correct behaviour — the precise noise
+    # that teaches a reader to skip warnings.
+    assert verify.transform_result("group_and_aggregate", 120, 5) is None
+    assert verify.transform_result("pivot", 120, 5) is None
+
+
+def test_a_normal_filter_does_not_warn():
+    # Filtering is meant to remove rows; 25 of 120 is a filter working.
+    assert verify.transform_result("filter_rows", 120, 25) is None
+
+
+def test_a_filter_matching_nothing_always_warns():
+    warning = verify.transform_result("filter_rows", 120, 0)
+    assert "no rows at all" in warning and "type" in warning
+
+
+def test_a_filter_matching_almost_nothing_warns():
+    # The signature of a wrong value or a type mismatch.
+    warning = verify.transform_result("filter_rows", 1000, 3)
+    assert "kept only 3 of 1000" in warning
+
+
+def test_reshaping_operation_returning_nothing_stays_quiet():
+    # An empty group-by result means empty input, which other warnings cover.
+    assert verify.transform_result("pivot", 100, 0) is None
+
+
+def test_suggest_catches_the_standardisation_case():
+    # The single most likely mistake this library produces: clean() renames
+    # 'Customer ID' to 'customer_id', so the next call uses the old name.
+    assert "customer_id" in suggest("Customer ID", ["customer_id", "full_name"])
+
+
+def test_suggest_catches_a_typo():
+    assert "revenue" in suggest("revenu", ["revenue", "region"])
+
+
+def test_suggest_returns_nothing_for_an_unrelated_name():
+    assert suggest("zzzz", ["revenue", "region"]) == []
+
+
+def test_missing_column_error_suggests_the_standardised_name():
+    df = pd.DataFrame({"customer_id": [1], "v": [2]})
+    with pytest.raises(ValueError, match="customer_id"):
+        filter_rows(df, "Customer ID", "gt", 0)
+
+
+def test_merge_accepts_differently_named_keys():
+    # A cleaned frame joined to an ingested one: no single `on` can work.
+    left = pd.DataFrame({"customer_id": [1, 2], "v": [10, 20]})
+    right = pd.DataFrame({"Customer ID": [1, 2], "tier": ["gold", "silver"]})
+    result = merge_dataframes(left, right, left_on="customer_id", right_on="Customer ID")
+    assert len(result) == 2
+    assert result["tier"].tolist() == ["gold", "silver"]
+
+
+def test_merge_error_points_at_left_on_right_on():
+    # The dead end: whichever single key name the caller picks, one side fails.
+    left = pd.DataFrame({"customer_id": [1]})
+    right = pd.DataFrame({"Customer ID": [1]})
+    with pytest.raises(ValueError, match="left_on and right_on"):
+        merge_dataframes(left, right, on="customer_id")
+
+
+def test_merge_rejects_on_together_with_left_on():
+    left = right = pd.DataFrame({"k": [1]})
+    with pytest.raises(ValueError, match="not both"):
+        merge_dataframes(left, right, on="k", left_on="k", right_on="k")
+
+
+def test_merge_requires_both_sides_of_a_split_key():
+    left = right = pd.DataFrame({"k": [1]})
+    with pytest.raises(ValueError, match="together"):
+        merge_dataframes(left, right, left_on="k")
+
+
+def test_merge_requires_matching_key_counts():
+    left = pd.DataFrame({"a": [1], "b": [1]})
+    right = pd.DataFrame({"c": [1]})
+    with pytest.raises(ValueError, match="one for one"):
+        merge_dataframes(left, right, left_on=["a", "b"], right_on=["c"])
+
+
+def test_merge_endpoint_accepts_left_on_right_on():
+    body = client.post("/merge", json={
+        "left": [{"customer_id": 1, "v": 10}],
+        "right": [{"Customer ID": 1, "tier": "gold"}],
+        "left_on": "customer_id", "right_on": "Customer ID",
+    }).json()
+    assert body["rows"] == 1 and "tier" in body["columns"]
+
+
+async def test_mcp_merge_data_accepts_left_on_right_on():
+    from dataprocessing import mcp_server
+
+    payload = tool_result(await mcp_server.mcp.call_tool("merge_data", {
+        "left": [{"customer_id": 1}], "right": [{"Customer ID": 1, "tier": "gold"}],
+        "left_on": "customer_id", "right_on": "Customer ID",
+    }))
+    assert payload["rows"] == 1
+
+
+def test_null_row_warning_reads_naturally_at_the_default():
+    # It said "rows with more than 0% null values were dropped", which is true
+    # and unreadable.
+    # 'b' is 30% null, so the COLUMN survives the 50% threshold and the rows
+    # holding those nulls are what get dropped. Sized deliberately: at 10/11
+    # null the column is dropped instead, nothing is left holding a null, and
+    # no row warning fires at all.
+    rows = [{"a": float(i), "b": float(i)} for i in range(10)]
+    for row in rows[:3]:
+        row["b"] = None
+
+    body = client.post("/clean", json={"data": rows}).json()
+    assert body["columns"] == ["a", "b"]
+    assert any("any null at all" in w for w in body["warnings"])

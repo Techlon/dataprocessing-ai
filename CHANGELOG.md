@@ -2,6 +2,29 @@
 
 ## 0.3.0
 
+### Found by using the tools, not by testing them
+
+A realistic CRM export — trailing spaces in headers, blank cells, duplicate
+rows, numbers stored as text, one absurd value — driven through the MCP tools
+the way an agent would. Three problems the 225-test suite did not catch:
+
+- **Grouping no longer reports a false alarm.** `group_and_aggregate` collapsing
+  120 rows to 5 was warned about as a 96% row loss. Collapsing rows *is*
+  grouping, so the warning fired on correct behaviour — exactly the noise that
+  teaches a reader to skip warnings, undoing the point of having them. Reshaping
+  operations are now exempt, a normal filter is quiet, and a filter matching
+  nothing or almost nothing still warns.
+- **A column name that no longer exists suggests the one that does.** `clean`
+  standardises names, so the most likely mistake in any pipeline is using a name
+  that was correct one step earlier. "Column 'Customer ID' does not exist" is
+  true and useless; it now adds "Did you mean 'customer_id'?".
+- **`merge` accepts `left_on`/`right_on`.** Joining a cleaned dataset to a
+  freshly ingested one was a dead end: the left has `customer_id`, the right has
+  `Customer ID`, and no single `on` value can bridge them. The error now names
+  the way out as well.
+
+### Added — warnings
+
 ### Added
 
 - **Operations now say when they did something surprising.** `/clean`,

@@ -36,6 +36,13 @@ from dataprocessing.analyse import full_report
 from dataprocessing.visualise import (
     histogram, bar_chart, scatter, line_chart, correlation_heatmap)
 
+
+def _null_row_cause(threshold):
+    """Phrase the row-null rule the way it actually behaves at its default."""
+    if threshold <= 0:
+        return "every row containing any null at all was dropped."
+    return f"rows more than {threshold:.0%} null were dropped."
+
 mcp = _Server("DataProcessing")
 
 @mcp.tool()
@@ -97,7 +104,7 @@ def clean_data(
                     row_threshold=row_null_threshold)
     warnings.append(verify.row_loss(
         rows_in, len(df),
-        f"rows with more than {row_null_threshold:.0%} null values were dropped.",
+        _null_row_cause(row_null_threshold),
         "Raise row_null_threshold to keep patchy rows.",
     ))
     warnings.append(verify.dropped_columns(
@@ -180,10 +187,7 @@ def transform_data(
         raise ValueError(f"Unknown operation: {operation}. Valid: {list(ops.keys())}")
     rows_in = len(df)
     result = ops[operation](df, **params)
-    warning = verify.row_loss(
-        rows_in, len(result), f"{operation} matched fewer rows than it received.",
-        "Check the operator and value against the column's actual contents.",
-    )
+    warning = verify.transform_result(operation, rows_in, len(result))
     return {
         "data": df_to_json(result),
         "rows": len(result),
@@ -197,6 +201,8 @@ def merge_data(
     left: List[Dict[str, Any]],
     right: List[Dict[str, Any]],
     on: Optional[Any] = None,
+    left_on: Optional[Any] = None,
+    right_on: Optional[Any] = None,
     how: str = "inner",
     validate: Optional[str] = None,
     suffixes: Optional[List[str]] = None
@@ -208,6 +214,11 @@ def merge_data(
         left: List of row dicts for the left dataset
         right: List of row dicts for the right dataset
         on: Column name, or list of names, to join on. Omit only for how="cross"
+            or when using left_on/right_on
+        left_on / right_on: Key names when the two datasets spell the key
+            differently. Needed after clean_data, which standardises column
+            names — a cleaned dataset has 'customer_id' where a freshly
+            ingested one still has 'Customer ID', and no single `on` works
         how: One of: inner, left, right, outer, cross
         validate: Optional cardinality check — "one_to_one", "one_to_many",
                   "many_to_one", "many_to_many". Use this when you know what the
@@ -232,7 +243,7 @@ def merge_data(
     left_df = pd.DataFrame(left)
     right_df = pd.DataFrame(right)
     result = merge_dataframes(
-        left_df, right_df, on=on, how=how,
+        left_df, right_df, on=on, left_on=left_on, right_on=right_on, how=how,
         validate=validate, suffixes=tuple(suffixes),
     )
     return {

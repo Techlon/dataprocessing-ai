@@ -4,9 +4,7 @@ import numpy as np
 SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 
 
-def _require_column(df, column):
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' does not exist.")
+from dataprocessing._columns import require_column as _require_column
 
 
 def _require_numeric(df, column):

@@ -40,6 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+def _null_row_cause(threshold):
+    """Phrase the row-null rule the way it actually behaves at its default."""
+    if threshold <= 0:
+        return "every row containing any null at all was dropped."
+    return f"rows more than {threshold:.0%} null were dropped."
+
 class CleanRequest(BaseModel):
     data: List[Dict[str, Any]]
     drop_null_threshold: float = DEFAULT_NULL_THRESHOLD
@@ -71,6 +78,11 @@ class MergeRequest(BaseModel):
     left: List[Dict[str, Any]]
     right: List[Dict[str, Any]]
     on: Optional[Union[str, List[str]]] = None
+    # For frames that spell the key differently — a cleaned frame has
+    # standardised names, an ingested one has the original ones, and no single
+    # `on` can bridge them.
+    left_on: Optional[Union[str, List[str]]] = None
+    right_on: Optional[Union[str, List[str]]] = None
     how: str = "inner"
     # The JSON key stays "validate" to match pandas' own vocabulary; the Python
     # attribute is renamed because a field called `validate` shadows a
@@ -131,7 +143,7 @@ def clean(req: CleanRequest):
         # changes it. A single before/after count could not.
         warnings.append(verify.row_loss(
             rows_in, len(df),
-            f"rows with more than {req.row_null_threshold:.0%} null values were dropped.",
+            _null_row_cause(req.row_null_threshold),
             "Raise row_null_threshold to keep patchy rows, or pass a subset to "
             "judge rows on key columns only.",
         ))
@@ -204,10 +216,7 @@ def transform(req: TransformRequest):
             raise HTTPException(status_code=400, detail=f"Unknown operation: {req.operation}. Valid: {list(ops.keys())}")
         rows_in = len(df)
         result = ops[req.operation](df, **req.params)
-        warning = verify.row_loss(
-            rows_in, len(result), f"{req.operation} matched fewer rows than it received.",
-            "Check the operator and value against the column's actual contents.",
-        )
+        warning = verify.transform_result(req.operation, rows_in, len(result))
         return {
             "data": df_to_json(result),
             "rows": len(result),
@@ -234,6 +243,8 @@ def merge(req: MergeRequest):
         result = merge_dataframes(
             left, right,
             on=req.on,
+            left_on=req.left_on,
+            right_on=req.right_on,
             how=req.how,
             validate=req.validate_join,
             suffixes=tuple(req.suffixes),

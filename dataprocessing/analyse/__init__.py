@@ -5,9 +5,7 @@ from typing import List, Dict, Any
 from dataprocessing._defaults import DEFAULT_IQR_FACTOR, check_positive
 
 
-def _require_column(df, column):
-    if column not in df.columns:
-        raise ValueError(f"Column '{column}' does not exist.")
+from dataprocessing._columns import require_column as _require_column
 
 
 def _numeric_columns(df):

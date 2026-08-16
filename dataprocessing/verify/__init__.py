@@ -48,6 +48,44 @@ def row_loss(rows_in, rows_out, cause, remedy=None, threshold=WARN_ROW_LOSS_SHAR
     return f"{message} {remedy}" if remedy else message
 
 
+# Operations whose whole purpose is to change the row count. Warning that a
+# group-by "removed 96% of rows" is not a finding, it is a description of
+# grouping — and a warning that fires on correct behaviour is worse than no
+# warning at all, because it teaches the reader to skip all of them.
+RESHAPING_OPERATIONS = frozenset({"group_and_aggregate", "pivot"})
+
+# A filter is meant to remove rows, so partial loss is not news. Matching
+# almost nothing usually is: it is the signature of a wrong value or a type
+# mismatch, e.g. filtering a text column of digits with a numeric comparison.
+FILTER_ALARM_SHARE = 0.90
+
+
+def transform_result(operation, rows_in, rows_out):
+    """Warn about a transform whose outcome the caller probably did not intend.
+
+    Deliberately quieter than a plain row-loss check. Found by using the tools
+    on real data: a group-by legitimately collapsing 120 rows to 5 was being
+    reported as a 96% loss, which is exactly the noise that makes an agent stop
+    reading warnings.
+    """
+    if rows_in <= 0 or operation in RESHAPING_OPERATIONS:
+        return None
+    if rows_out == 0:
+        return (
+            f"{operation} returned no rows at all from {rows_in}. Check the "
+            f"value and the column's type — comparing a numeric value against "
+            f"a column of text digits matches nothing."
+        )
+    if operation == "filter_rows" and (rows_in - rows_out) / rows_in >= FILTER_ALARM_SHARE:
+        lost = rows_in - rows_out
+        return (
+            f"filter_rows kept only {rows_out} of {rows_in} rows "
+            f"({_percent(lost, rows_in):.0f}% removed). Intended, or is the "
+            f"comparison value wrong for this column?"
+        )
+    return None
+
+
 def dropped_columns(columns_in, columns_out, cause, remedy=None):
     """Warn that columns disappeared. Always reported — a column vanishing is
     never routine, and the caller may be about to ask for one that is gone."""
