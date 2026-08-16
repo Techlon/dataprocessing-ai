@@ -15,6 +15,7 @@ from dataprocessing import __version__
 from dataprocessing._defaults import (
     DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
 )
+from dataprocessing import verify
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.clean import (
     drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
@@ -120,16 +121,56 @@ def clean(req: CleanRequest):
     try:
         df = pd.DataFrame(req.data)
         rows_in, columns_in = len(df), len(df.columns)
+        original_columns = list(df.columns)
+        warnings = []
+
         df = drop_nulls(df, threshold=req.drop_null_threshold,
                         row_threshold=req.row_null_threshold)
+        # Measured per stage rather than once at the end, so each warning can
+        # name the step that actually caused the loss and the option that
+        # changes it. A single before/after count could not.
+        warnings.append(verify.row_loss(
+            rows_in, len(df),
+            f"rows with more than {req.row_null_threshold:.0%} null values were dropped.",
+            "Raise row_null_threshold to keep patchy rows, or pass a subset to "
+            "judge rows on key columns only.",
+        ))
+        warnings.append(verify.dropped_columns(
+            original_columns, list(df.columns),
+            f"more than {req.drop_null_threshold:.0%} of their values were null.",
+            "Raise drop_null_threshold to keep them.",
+        ))
+
+        rows_before_dupes = len(df)
         if req.remove_dupes:
             df = remove_duplicates(df)
+            warnings.append(verify.row_loss(
+                rows_before_dupes, len(df), "duplicate rows were removed.",
+                "Set remove_dupes to false to keep them.",
+            ))
         # The request model has always offered this flag; it was declared and
         # then ignored, so callers asking for outlier removal silently got none.
+        rows_before_outliers = len(df)
         if req.remove_outliers:
             df = remove_outliers_iqr(df, factor=req.outlier_factor)
+            warnings.append(verify.row_loss(
+                rows_before_outliers, len(df),
+                f"rows holding a value beyond {req.outlier_factor} x the "
+                f"interquartile range were removed.",
+                "Raise outlier_factor to keep more, or set remove_outliers to "
+                "false — an extreme value is sometimes the observation that matters.",
+            ))
         if req.standardise_cols:
             df = standardise_columns(df)
+        # Per-stage warnings each carry a specific remedy, but each is judged
+        # against its own threshold — so several small losses can compound past
+        # it while no single stage trips. This catches that case.
+        if not any(warnings):
+            warnings.append(verify.row_loss(
+                rows_in, len(df), "cleaning removed rows across several steps.",
+                "Compare rows against rows_in, and relax the thresholds if the "
+                "loss is more than you intended.",
+            ))
         return {
             "data": df_to_json(df),
             "rows": len(df),
@@ -139,6 +180,7 @@ def clean(req: CleanRequest):
             # visible in the response instead of something to think to check.
             "rows_in": rows_in,
             "columns_in": columns_in,
+            "warnings": [w for w in warnings if w],
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -160,8 +202,19 @@ def transform(req: TransformRequest):
         }
         if req.operation not in ops:
             raise HTTPException(status_code=400, detail=f"Unknown operation: {req.operation}. Valid: {list(ops.keys())}")
+        rows_in = len(df)
         result = ops[req.operation](df, **req.params)
-        return {"data": df_to_json(result), "rows": len(result), "columns": list(result.columns)}
+        warning = verify.row_loss(
+            rows_in, len(result), f"{req.operation} matched fewer rows than it received.",
+            "Check the operator and value against the column's actual contents.",
+        )
+        return {
+            "data": df_to_json(result),
+            "rows": len(result),
+            "columns": list(result.columns),
+            "rows_in": rows_in,
+            "warnings": [warning] if warning else [],
+        }
     except HTTPException:
         raise
     except (ValueError, KeyError, TypeError) as e:
@@ -193,6 +246,8 @@ def merge(req: MergeRequest):
             # inflation: the caller can see 3 x 3 rows became 9.
             "left_rows": len(left),
             "right_rows": len(right),
+            "warnings": verify.merge_result(
+                len(left), len(right), len(result), how=req.how),
         }
     except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))

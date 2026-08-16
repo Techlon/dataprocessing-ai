@@ -20,6 +20,7 @@ import base64
 from dataprocessing._defaults import (
     DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
 )
+from dataprocessing import verify
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.ingest import read_file
 from dataprocessing.clean import (
@@ -81,27 +82,63 @@ def clean_data(
                         true. 1.5 is conventional; 3.0 removes fewer rows
     Returns:
         Dict with keys: data (cleaned records), rows, columns, rows_in,
-        columns_in. Compare rows against rows_in: cleaning drops every row
-        containing any null, so a dataset with a few percent of cells missing
-        routinely loses a quarter of its rows.
+        columns_in, warnings.
+
+        READ THE WARNINGS before using the data. Cleaning is lossy and says so
+        there: it reports how many rows and columns went and which option to
+        change. An empty warnings list means nothing surprising happened.
     """
     df = pd.DataFrame(data)
     rows_in, columns_in = len(df), len(df.columns)
+    original_columns = list(df.columns)
+    warnings = []
+
     df = drop_nulls(df, threshold=drop_null_threshold,
                     row_threshold=row_null_threshold)
+    warnings.append(verify.row_loss(
+        rows_in, len(df),
+        f"rows with more than {row_null_threshold:.0%} null values were dropped.",
+        "Raise row_null_threshold to keep patchy rows.",
+    ))
+    warnings.append(verify.dropped_columns(
+        original_columns, list(df.columns),
+        f"more than {drop_null_threshold:.0%} of their values were null.",
+        "Raise drop_null_threshold to keep them.",
+    ))
+
+    rows_before_dupes = len(df)
     if remove_dupes:
         df = remove_duplicates(df)
+        warnings.append(verify.row_loss(
+            rows_before_dupes, len(df), "duplicate rows were removed.",
+            "Set remove_dupes to false to keep them.",
+        ))
     # Parity with the REST /clean endpoint, which offers the same option.
+    rows_before_outliers = len(df)
     if remove_outlier_rows:
         df = remove_outliers_iqr(df, factor=outlier_factor)
+        warnings.append(verify.row_loss(
+            rows_before_outliers, len(df),
+            f"rows beyond {outlier_factor} x the interquartile range were removed.",
+            "Raise outlier_factor to keep more, or set remove_outlier_rows to false.",
+        ))
     if standardise_cols:
         df = standardise_columns(df)
+    # Several small losses can compound past the threshold while no single
+    # stage trips it; this catches that case.
+    if not any(warnings):
+        warnings.append(verify.row_loss(
+            rows_in, len(df), "cleaning removed rows across several steps.",
+            "Compare rows against rows_in, and relax the thresholds if the loss "
+            "is more than you intended.",
+        ))
     return {
         "data": df_to_json(df),
         "rows": len(df),
         "columns": list(df.columns),
         "rows_in": rows_in,
-        "columns_in": columns_in
+        "columns_in": columns_in,
+        "warnings": [w for w in warnings if w]
     }
 
 @mcp.tool()
@@ -125,7 +162,9 @@ def transform_data(
                 pivot          -> {index, columns, values, aggfunc}
                 add_column     -> {column_name, expression}
     Returns:
-        Dict with keys: data (transformed records), rows (int), columns (list)
+        Dict with keys: data (transformed records), rows, columns, rows_in,
+        warnings. Check warnings: an operation that matched far fewer rows than
+        it received says so there.
     """
     df = pd.DataFrame(data)
     ops = {
@@ -139,11 +178,18 @@ def transform_data(
     }
     if operation not in ops:
         raise ValueError(f"Unknown operation: {operation}. Valid: {list(ops.keys())}")
+    rows_in = len(df)
     result = ops[operation](df, **params)
+    warning = verify.row_loss(
+        rows_in, len(result), f"{operation} matched fewer rows than it received.",
+        "Check the operator and value against the column's actual contents.",
+    )
     return {
         "data": df_to_json(result),
         "rows": len(result),
-        "columns": list(result.columns)
+        "columns": list(result.columns),
+        "rows_in": rows_in,
+        "warnings": [warning] if warning else []
     }
 
 @mcp.tool()
@@ -172,8 +218,11 @@ def merge_data(
         suffixes: Two suffixes for columns present in both, default ["_x", "_y"]
     Returns:
         Dict with keys: data (merged records), rows, columns, left_rows,
-        right_rows. Compare rows against left_rows/right_rows to spot a join
-        that inflated the data.
+        right_rows, warnings.
+
+        READ THE WARNINGS. A join fails by multiplying rows rather than by
+        erroring, and that is what they report — along with a join that matched
+        nothing, or one that dropped unmatched rows.
     """
     if suffixes is None:
         suffixes = ["_x", "_y"]
@@ -192,6 +241,8 @@ def merge_data(
         "columns": list(result.columns),
         "left_rows": len(left_df),
         "right_rows": len(right_df),
+        "warnings": verify.merge_result(
+            len(left_df), len(right_df), len(result), how=how),
     }
 
 @mcp.tool()

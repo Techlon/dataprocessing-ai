@@ -27,6 +27,15 @@ Tukey's convention: roughly 0.7% of normally-distributed data falls outside it.
 Raise it (3.0 marks only 'far out' points) to flag less, lower it to flag more."""
 
 
+WARN_ROW_LOSS_SHARE = 0.10
+"""Share of rows an operation may remove before it is worth warning about.
+
+Not zero, deliberately. A warning on every row removed would fire constantly,
+and an agent that sees a warning on every call learns to ignore warnings — which
+costs more than the feature gains. Losing everything is always reported,
+whatever this is set to."""
+
+
 def check_share(value, name="threshold"):
     """Validate a proportion. Rejects the percentage-vs-share slip."""
     if not 0 <= value <= 1:

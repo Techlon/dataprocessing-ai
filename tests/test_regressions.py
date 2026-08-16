@@ -1080,3 +1080,168 @@ def test_clean_options_match_across_interfaces():
     # The REST field is named for the operation it controls; the tool predates it.
     rest = {"remove_outlier_rows" if f == "remove_outliers" else f for f in rest}
     assert rest == tool, f"only in REST: {rest - tool}; only in MCP: {tool - rest}"
+
+
+# ===========================================================================
+# Warnings: the library says when it did something surprising
+# ===========================================================================
+# Passive reporting (rows vs rows_in) only helps a caller who thinks to compare
+# them. These assert the active version: a plain statement in the response.
+
+from dataprocessing import verify
+
+
+def test_row_loss_is_quiet_below_the_threshold():
+    # A warning on every row removed would fire constantly, and an agent that
+    # sees warnings on every call learns to ignore them.
+    assert verify.row_loss(1000, 995, "cause") is None
+    assert verify.row_loss(1000, 100, "cause") is not None
+
+
+def test_row_loss_always_reports_total_loss():
+    # However the threshold is set: an empty result is the most misleading
+    # thing the library can return without saying why.
+    warning = verify.row_loss(1000, 0, "everything matched nothing.")
+    assert "All 1000 rows were removed" in warning
+
+
+def test_row_loss_is_silent_when_nothing_was_lost():
+    assert verify.row_loss(10, 10, "cause") is None
+    assert verify.row_loss(0, 0, "cause") is None
+
+
+def test_warnings_name_the_remedy():
+    # What happened, how much, and what to do — a warning missing the third
+    # cannot be acted on.
+    warning = verify.row_loss(100, 10, "rows were dropped.", "Raise the threshold.")
+    assert "90 of 100" in warning and "Raise the threshold." in warning
+
+
+def test_dropped_columns_always_reported():
+    warning = verify.dropped_columns(["a", "b"], ["a"], "they were empty.")
+    assert "'b'" in warning
+    assert verify.dropped_columns(["a"], ["a"], "cause") is None
+
+
+def test_merge_warns_about_fan_out():
+    warnings = verify.merge_result(3, 2, 4, how="inner")
+    assert any("multiplied" in w and "validate" in w for w in warnings)
+
+
+def test_merge_warns_about_no_overlap():
+    warnings = verify.merge_result(3, 3, 0, how="inner")
+    assert any("do not overlap" in w for w in warnings)
+
+
+def test_merge_warns_about_dropped_unmatched_rows():
+    warnings = verify.merge_result(10, 10, 4, how="inner")
+    assert any("how='left'" in w for w in warnings)
+
+
+def test_merge_is_quiet_on_a_clean_join():
+    assert verify.merge_result(3, 3, 3, how="inner") == []
+
+
+def test_merge_is_quiet_for_a_cross_join():
+    # A cross join is supposed to multiply; saying so would be noise.
+    assert verify.merge_result(3, 3, 9, how="cross") == []
+
+
+# 20 rows with b null in 5 of them. Deliberately 25%, not more: over 50% and
+# the COLUMN threshold drops b entirely before any row is judged, and these
+# tests would silently be measuring column loss instead of row loss.
+ROWS_WITH_SOME_NULLS = [
+    {"a": float(i), "b": None if i < 5 else float(i)} for i in range(20)
+]
+
+
+def test_clean_endpoint_warns_about_row_loss():
+    body = client.post("/clean", json={"data": ROWS_WITH_SOME_NULLS}).json()
+    assert body["rows_in"] == 20 and body["rows"] == 15
+    assert list(body["columns"]) == ["a", "b"]  # the column survived
+    assert any("row_null_threshold" in w for w in body["warnings"])
+
+
+def test_clean_endpoint_warns_about_dropped_columns():
+    rows = [{"keep": 1.0, "dead": None} for _ in range(4)]
+    body = client.post("/clean", json={"data": rows}).json()
+    assert any("'dead'" in w for w in body["warnings"])
+
+
+def test_clean_endpoint_is_quiet_on_clean_data():
+    rows = [{"a": float(i), "b": float(i)} for i in range(10)]
+    assert client.post("/clean", json={"data": rows}).json()["warnings"] == []
+
+
+def test_clean_endpoint_catches_compound_loss():
+    # Three stages each losing under the threshold, compounding past it. No
+    # single stage trips, so without the fallback this would report nothing.
+    rows = [{"a": float(i), "b": float(i)} for i in range(100)]
+    for row in rows[:5]:
+        row["a"] = None
+    rows += [dict(rows[20])] * 5
+    for row in rows[30:35]:
+        row["a"] = 99999.0
+
+    body = client.post("/clean", json={"data": rows, "remove_outliers": True}).json()
+    assert body["rows_in"] - body["rows"] == 15
+    assert len(body["warnings"]) == 1
+    assert "across several steps" in body["warnings"][0]
+
+
+def test_merge_endpoint_warns_about_fan_out():
+    body = client.post("/merge", json={
+        "left": [{"k": 1}, {"k": 1}], "right": [{"k": 1}, {"k": 1}], "on": "k",
+    }).json()
+    assert any("multiplied" in w for w in body["warnings"])
+
+
+def test_transform_endpoint_warns_about_an_aggressive_filter():
+    rows = [{"a": i} for i in range(100)]
+    body = client.post("/transform", json={
+        "data": rows, "operation": "filter_rows",
+        "params": {"column": "a", "operator": "gt", "value": 95},
+    }).json()
+    assert body["rows_in"] == 100 and body["rows"] == 4
+    assert any("filter_rows" in w for w in body["warnings"])
+
+
+def test_transform_endpoint_is_quiet_when_nothing_is_lost():
+    rows = [{"a": i} for i in range(10)]
+    body = client.post("/transform", json={
+        "data": rows, "operation": "sort_rows", "params": {"columns": "a"},
+    }).json()
+    assert body["warnings"] == []
+
+
+async def test_mcp_clean_data_returns_warnings():
+    from dataprocessing import mcp_server
+
+    payload = tool_result(await mcp_server.mcp.call_tool(
+        "clean_data", {"data": ROWS_WITH_SOME_NULLS}))
+    assert any("row_null_threshold" in w for w in payload["warnings"])
+
+
+async def test_mcp_merge_data_returns_warnings():
+    from dataprocessing import mcp_server
+
+    payload = tool_result(await mcp_server.mcp.call_tool(
+        "merge_data", {"left": [{"k": 1}, {"k": 1}], "right": [{"k": 1}, {"k": 1}], "on": "k"}))
+    assert any("multiplied" in w for w in payload["warnings"])
+
+
+async def test_mcp_tool_descriptions_tell_the_agent_to_read_warnings():
+    # The field is useless if the agent does not know to look at it, so the
+    # instruction lives in the tool description the model actually sees.
+    from dataprocessing import mcp_server
+
+    tools = {t.name: t.description for t in await mcp_server.mcp.list_tools()}
+    assert "READ THE WARNINGS" in tools["clean_data"]
+    assert "READ THE WARNINGS" in tools["merge_data"]
+
+
+def test_warnings_are_json_safe():
+    rows = [{"a": 1.0, "b": None} for _ in range(20)]
+    body = client.post("/clean", json={"data": rows}).json()
+    json.dumps(body["warnings"])
+    assert all(isinstance(w, str) for w in body["warnings"])

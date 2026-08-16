@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- **Operations now say when they did something surprising.** `/clean`,
+  `/transform` and `/merge`, and the matching MCP tools, return a `warnings`
+  list alongside the data.
+
+  Every serious defect this library has had shared one property: it returned a
+  confident, plausible, wrong answer. 0.2.0 answered that by reporting `rows_in`
+  next to `rows`, but passively — it only helps a caller who thinks to compare
+  the two, and mostly they do not. A warning is the active form of the same
+  information, and the MCP tool descriptions tell the model to read it.
+
+  Each warning states what happened, how large it was, and which option changes
+  it, because a warning missing the third cannot be acted on. Currently covered:
+  row loss during cleaning (attributed to the step that caused it — nulls,
+  duplicates or outliers), columns dropped for being mostly null, joins that
+  multiplied rows rather than pairing them, joins whose keys do not overlap at
+  all, inner joins that dropped unmatched rows, and transforms that matched far
+  fewer rows than they received.
+
+  Warnings describe outcomes, not faults: removing 90% of the rows may be
+  exactly what was asked for, and only the caller can tell, so this reports
+  rather than raises. Losses under 10% are not reported — a warning on every
+  call teaches the reader to ignore warnings — but total loss is always
+  reported, and so is a series of small per-step losses that compounds past the
+  threshold while no single step trips it.
+
+  The building blocks are public: `dataprocessing.verify`.
+
 ## 0.2.0
 
 A correctness pass over every module, plus the two interfaces. Most of this

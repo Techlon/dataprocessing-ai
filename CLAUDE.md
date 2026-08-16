@@ -18,7 +18,7 @@ competing head-on with pandas.
 - GitHub: `Techlon/dataprocessing-ai`
 - Package name (PyPI): `dataprocessing-ai`
 - Import name (Python): `dataprocessing`  (these intentionally differ)
-- Current published version: 0.1.1 (0.2.0 prepared, see CHANGELOG.md)
+- Current published version: 0.2.0 (0.3.0 prepared, see CHANGELOG.md)
 - CI: `.github/workflows/ci.yml`. Release: tag `vX.Y.Z`, see `RELEASING.md`
 - Supported: Python 3.10-3.13, pandas 2.2-3.x, mcp 1.x and 2.x (all in CI)
 
@@ -31,11 +31,12 @@ dataprocessing/
   transform/    filter, sort, group, pivot, merge, add_column
   analyse/      summary stats, correlations, outliers, missing report
   visualise/    histogram, bar, scatter, line, correlation_heatmap (Vega-Lite specs)
+  verify/       warnings: what an operation did that the caller may not expect
   _defaults.py  judgement values (null/type thresholds, IQR factor) + validators
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 188 tests, must stay green
+tests/          pytest suite — 209 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -158,7 +159,7 @@ run, and keep the review/verification role.
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 188 passed
+pytest -q                  # expect: 209 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"
@@ -211,6 +212,23 @@ Core is deliberately lean (pandas, numpy only). Everything else is optional:
 
 Keep the core lean. Don't add runtime dependencies to the core that only one
 interface needs.
+
+## The warnings idea (verify/)
+
+The recurring defect in this library was never a crash — it was a confident,
+plausible, wrong answer: cleaning that emptied text columns, outlier detection
+that reported none, a rename that did nothing, a join that multiplied rows. An
+agent calling these unattended has no other way to notice.
+
+`verify/` is the smallest useful answer: operations report what they did that a
+caller may not expect, in the response, in plain sentences. A warning must state
+what happened, how much, and what to change — one missing the third cannot be
+acted on. Warnings describe outcomes, not faults; removing 90% of rows may be
+correct, and only the caller knows.
+
+Two rules worth keeping: do not warn on everything (an agent that sees warnings
+constantly stops reading them), and always warn on total loss. This is the
+half of the stateful-session idea below that pays off without session state.
 
 ## Strategic direction
 

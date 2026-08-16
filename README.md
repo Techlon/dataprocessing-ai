@@ -149,6 +149,44 @@ drop_nulls(df, subset=["id", "date"])      # require the key fields only
 clean_all(df, row_null_threshold=0.5)      # same dial, from the top level
 ```
 
+## Warnings
+
+`/clean`, `/transform` and `/merge` return a `warnings` list alongside the data,
+and so do the matching MCP tools. It is empty when nothing surprising happened.
+
+The operations in this library fail quietly. Cleaning removes rows for a single
+null; a join with a repeated key multiplies rows instead of pairing them; a
+filter that matches nothing returns an empty set rather than an error. Every one
+of those produces a plausible answer that a caller has no other way to question.
+Reporting `rows` next to `rows_in` only helps someone who thinks to compare them.
+
+Each warning says what happened, how large it was, and what to change:
+
+```
+Removed 53 of 200 rows (26%): rows with more than 0% null values were dropped.
+Raise row_null_threshold to keep patchy rows, or pass a subset to judge rows on
+key columns only.
+
+Join returned 4 rows from 3 left and 2 right: the key matched more than once, so
+rows were multiplied rather than paired. Pass validate='one_to_one' or
+'many_to_one' to make an unexpected fan-out an error.
+
+Join returned no rows: the key values do not overlap at all. Check the join
+column, and check its type — 1 and '1' do not match.
+```
+
+Warnings describe outcomes, not faults. Removing 90% of the rows may be exactly
+what you asked for; only the caller can tell, which is why this reports rather
+than raises. Small losses are not reported, on the reasoning that a warning on
+every call teaches the reader to ignore warnings — but losing *everything* is
+always reported, and so is a series of small losses that compounds.
+
+The building blocks are importable directly:
+
+```python
+from dataprocessing.verify import row_loss, dropped_columns, merge_result
+```
+
 ## Behaviour worth knowing
 
 **Nulls are excluded, not propagated.** Every statistic in `analyse` and every

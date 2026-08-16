@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataprocessing-ai"
-version = "0.2.0"
+version = "0.3.0"
 description = "AI-native data processing library — REST API, MCP server, and Python package"
 readme = "README.md"
 # Every optional interface needs 3.10: mcp, fastapi and uvicorn all declare
