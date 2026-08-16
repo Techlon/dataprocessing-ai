@@ -1,5 +1,10 @@
 # DataProcessing AI
 
+[![CI](https://github.com/Techlon/dataprocessing-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Techlon/dataprocessing-ai/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dataprocessing-ai)](https://pypi.org/project/dataprocessing-ai/)
+[![Python](https://img.shields.io/pypi/pyversions/dataprocessing-ai)](https://pypi.org/project/dataprocessing-ai/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 An AI-native Python library for data processing and transformation.
 Built to be called by any AI agent via REST API, MCP server, or direct Python import.
 
