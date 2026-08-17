@@ -37,7 +37,7 @@ dataprocessing/
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 243 tests, must stay green
+tests/          pytest suite — 252 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -146,6 +146,11 @@ run, and keep the review/verification role.
   into two modules that could drift into disagreeing about what an outlier is.
 - **Validate a share as a share.** Passing `50` for "50%" was silently accepted
   and did nothing, because no column is 5000% null. `check_share` rejects it.
+- **A tag publishes whatever it points at, not whatever is on main.** `v0.3.0`
+  was pushed while work was still landing, so PyPI got a build five commits
+  behind that contained the group-by false alarm. Before tagging, check
+  `git log --oneline vX.Y.Z..HEAD` is empty, and re-check what is actually on
+  PyPI rather than repeating what you remember.
 - **Mutation-test a claim before trusting it.** Reverting a fix and rerunning
   the suite is the only proof a regression test guards what it says. Doing this
   showed that removing `to_native` from the API and MCP handlers broke nothing,
@@ -169,7 +174,7 @@ to check; using the thing shows what you did not.
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 243 passed
+pytest -q                  # expect: 252 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"
