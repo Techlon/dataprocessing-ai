@@ -18,7 +18,7 @@ competing head-on with pandas.
 - GitHub: `Techlon/dataprocessing-ai`
 - Package name (PyPI): `dataprocessing-ai`
 - Import name (Python): `dataprocessing`  (these intentionally differ)
-- Current published version: 0.4.0. NOTE: 0.3.0 shipped with a false-alarm bug
+- Current published version: 0.5.0. NOTE: 0.3.0 shipped with a false-alarm bug
   (group-by reported as row loss); it was tagged mid-stream, five commits behind.
 - CI: `.github/workflows/ci.yml`. Release: tag `vX.Y.Z`, see `RELEASING.md`
 - Supported: Python 3.10-3.13, pandas 2.2-3.x, mcp 1.x and 2.x (all in CI)
@@ -37,7 +37,7 @@ dataprocessing/
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 252 tests, must stay green
+tests/          pytest suite — 265 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -146,6 +146,10 @@ run, and keep the review/verification role.
   into two modules that could drift into disagreeing about what an outlier is.
 - **Validate a share as a share.** Passing `50` for "50%" was silently accepted
   and did nothing, because no column is 5000% null. `check_share` rejects it.
+- **A helper with no call sites is a bug, not spare capacity.** `verify.type_changes`
+  shipped in two releases unused, because the `fix_types` call it described was
+  never wired into either interface. Grep for call sites before believing a
+  feature is reachable.
 - **A tag publishes whatever it points at, not whatever is on main.** `v0.3.0`
   was pushed while work was still landing, so PyPI got a build five commits
   behind that contained the group-by false alarm. Before tagging, check
@@ -174,7 +178,7 @@ to check; using the thing shows what you did not.
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 252 passed
+pytest -q                  # expect: 265 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"

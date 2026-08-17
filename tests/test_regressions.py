@@ -1590,3 +1590,112 @@ async def test_mcp_clean_data_reports_retained_outliers():
     rows = [{"v": float(i)} for i in range(200)] + [{"v": 999999.0}]
     payload = tool_result(await mcp_server.mcp.call_tool("clean_data", {"data": rows}))
     assert any("999999" in w for w in payload["warnings"])
+
+
+# ===========================================================================
+# 0.5.0: the interfaces never converted types, and analyse said nothing
+# ===========================================================================
+
+def test_analyse_warns_when_the_report_would_be_empty():
+    # The worst thing analyse could return: well-formed, confident, empty, and
+    # silent about why. This is the failure class the verify module exists to
+    # catch, and it was sitting inside the verify module's own blind spot.
+    rows = [{"region": "north", "revenue": "1200.50"},
+            {"region": "south", "revenue": "980.00"}]
+    body = client.post("/analyse", json={"data": rows}).json()
+    assert body["summary_stats"] == {}
+    warning = " ".join(body["warnings"])
+    assert "contains nothing" in warning
+    assert "'revenue'" in warning and "numeric" in warning
+
+
+def test_empty_report_warning_names_the_convertible_share():
+    # A column that is only partly numeric will not be auto-converted, which is
+    # exactly when the caller most needs to be told it exists.
+    rows = [{"v": "1"}, {"v": "2"}, {"v": "3"}, {"v": "4"}, {"v": "oops"}]
+    body = client.post("/analyse", json={"data": rows}).json()
+    assert any("80% numeric" in w for w in body["warnings"])
+
+
+def test_all_text_report_says_so_without_a_false_hint():
+    rows = [{"a": "cat"}, {"a": "dog"}]
+    warning = " ".join(client.post("/analyse", json={"data": rows}).json()["warnings"])
+    assert "text or dates" in warning and "look like numbers" not in warning
+
+
+def test_analyse_is_quiet_when_it_has_numbers():
+    rows = [{"a": float(i), "b": float(i % 7)} for i in range(40)]
+    assert client.post("/analyse", json={"data": rows}).json()["warnings"] == []
+
+
+def test_clean_endpoint_converts_quoted_numbers():
+    # fix_types was reachable only through clean_all, which no interface calls,
+    # so numbers arriving as JSON strings stayed text all the way to analyse.
+    rows = [{"revenue": "1200.50"}, {"revenue": "980.00"}, {"revenue": "1450.75"}]
+    body = client.post("/clean", json={"data": rows}).json()
+    assert all(isinstance(r["revenue"], float) for r in body["data"])
+
+
+def test_clean_to_analyse_chain_now_produces_statistics():
+    rows = [{"region": "north", "revenue": "1200.50"},
+            {"region": "south", "revenue": "980.00"},
+            {"region": "north", "revenue": "1450.75"},
+            {"region": "south", "revenue": "1100.00"}]
+    cleaned = client.post("/clean", json={"data": rows}).json()
+    report = client.post("/analyse", json={"data": cleaned["data"]}).json()
+    assert "revenue" in report["summary_stats"]
+    assert report["summary_stats"]["revenue"]["count"] == 4
+
+
+def test_clean_reports_values_lost_to_a_type_conversion():
+    # type_changes existed in verify but had zero call sites — it was written
+    # to report this and never wired in, because the conversion was not either.
+    rows = [{"v": str(i)} for i in range(19)] + [{"v": "n/a"}]
+    body = client.post("/clean", json={"data": rows, "row_null_threshold": 1.0}).json()
+    assert any("did not convert" in w and "'v'" in w for w in body["warnings"])
+
+
+def test_clean_can_decline_type_conversion():
+    rows = [{"v": "1"}, {"v": "2"}]
+    body = client.post("/clean", json={"data": rows, "fix_types": False}).json()
+    assert all(isinstance(r["v"], str) for r in body["data"])
+
+
+def test_clean_respects_a_stricter_type_threshold():
+    rows = [{"v": str(i)} for i in range(19)] + [{"v": "n/a"}]
+    strict = client.post("/clean", json={
+        "data": rows, "row_null_threshold": 1.0, "type_threshold": 1.0}).json()
+    assert all(isinstance(r["v"], str) for r in strict["data"])
+
+
+def test_type_conversion_leaves_genuine_text_alone():
+    rows = [{"name": "Ada Lovelace"}, {"name": "Bob Smith"}, {"name": "Cy Jones"}]
+    body = client.post("/clean", json={"data": rows}).json()
+    assert [r["name"] for r in body["data"]] == ["Ada Lovelace", "Bob Smith", "Cy Jones"]
+
+
+async def test_mcp_clean_data_converts_types_too():
+    from dataprocessing import mcp_server
+
+    rows = [{"revenue": "1200.50"}, {"revenue": "980.00"}, {"revenue": "1450.75"}]
+    payload = tool_result(await mcp_server.mcp.call_tool("clean_data", {"data": rows}))
+    assert all(isinstance(r["revenue"], float) for r in payload["data"])
+
+
+async def test_mcp_analyse_data_warns_on_an_empty_report():
+    from dataprocessing import mcp_server
+
+    rows = [{"a": "1200.50"}, {"a": "980.00"}]
+    payload = tool_result(await mcp_server.mcp.call_tool("analyse_data", {"data": rows}))
+    assert any("contains nothing" in w for w in payload["warnings"])
+
+
+def test_validators_are_not_re_exported_as_public_api():
+    # They leaked into clean and analyse through plain imports, which made them
+    # look like part of each module's surface.
+    import dataprocessing.analyse as analyse_mod
+    import dataprocessing.clean as clean_mod
+
+    for mod in (analyse_mod, clean_mod):
+        assert not hasattr(mod, "check_share")
+        assert not hasattr(mod, "check_positive")

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.0
+
+A minor rather than a patch release: `/clean` and `clean_data` now convert types
+by default, which changes the values they return. Everything here came out of a
+full audit of the library rather than from new feature work.
+
+### Fixed
+
+- **`analyse` no longer returns an empty report in silence.** Given a dataset
+  whose numbers arrived as text — the ordinary shape when data is chained from
+  another tool — it returned `summary_stats: {}`, `correlation_matrix: {}` and
+  no warning at all. Well-formed, confident and empty, which is precisely the
+  failure this library exists to catch, sitting inside the module written to
+  catch it. It now says the report contains nothing, names the columns holding
+  numbers stored as text, and reports what share of each would convert, so a
+  partly-numeric column can be dealt with rather than silently ignored.
+
+- **The interfaces convert types at all.** `fix_types` was reachable only
+  through `clean_all`, which neither the REST API nor the MCP server calls, so
+  no amount of cleaning ever turned `"1200.50"` into a number. `/clean` and
+  `clean_data` now run it by default, with `fix_types` to decline and
+  `type_threshold` to control how much of a column must convert.
+
+- **`verify.type_changes` is no longer dead code.** It was written to report
+  values a conversion blanked, shipped in 0.3.0 and 0.4.0 with zero call sites,
+  because the conversion it described was not wired in either. Both now are, and
+  a conversion that nulls part of a column says which column and how many values.
+
+### Changed
+
+- Validators and column helpers no longer leak into the public surface of
+  `clean`, `analyse` and `transform` through plain imports.
+- The README states the REST API's deployment posture plainly: no auth, no size
+  limit, any origin, intended for localhost.
+
 ## 0.4.0
 
 Everything below was written before 0.3.0 was tagged but landed after it, so it

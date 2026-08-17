@@ -238,6 +238,34 @@ MEAN_DISTORTION_SHARE = 0.10
 THIN_CHART_POINTS = 5
 
 
+def _text_columns_that_are_really_numbers(df, threshold=0.5):
+    """Text columns holding mostly numbers, with the share that would convert.
+
+    The common cause of an all-text frame is JSON: numbers arriving quoted from
+    another tool or an API. Naming those columns turns "nothing to report" into
+    an instruction.
+
+    The threshold here is lower than the one `fix_types` converts at, and
+    deliberately so: this is a hint about where to look, not a conversion. A
+    column that is 60% numeric will not be converted automatically, and that is
+    exactly the case where the caller most needs to be told it exists.
+    """
+    import pandas as pd
+
+    found = []
+    for column in df.columns:
+        series = df[column]
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        non_null = int(series.count())
+        if non_null == 0:
+            continue
+        share = int(pd.to_numeric(series, errors="coerce").count()) / non_null
+        if share >= threshold:
+            found.append((column, share))
+    return found
+
+
 def analysis(df):
     """Warn about columns whose statistics are likely to mislead.
 
@@ -250,6 +278,29 @@ def analysis(df):
     total = len(df)
     if total == 0:
         return ["The dataset is empty, so every statistic below is undefined."]
+
+    # An empty report is the most misleading thing analyse can return: it is
+    # well-formed, confident, and says nothing about why it is empty. This is
+    # the failure class the whole module exists to catch, and it was sitting
+    # inside the module itself.
+    numeric_columns = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    if not numeric_columns:
+        looks_numeric = _text_columns_that_are_really_numbers(df)
+        message = (
+            "No column is numeric, so summary_stats, correlations and outliers "
+            "are all empty — this report contains nothing."
+        )
+        if looks_numeric:
+            names = ", ".join(f"{c!r} ({share:.0%} numeric)" for c, share in looks_numeric)
+            message += (
+                f" Column(s) [{names}] hold values that look like numbers but "
+                f"are stored as text. Clean the data with fix_types enabled — "
+                f"and if a column is only partly numeric, lower type_threshold "
+                f"to that share or repair the offending values first."
+            )
+        else:
+            message += " Every column holds text or dates."
+        warnings.append(message)
 
     for column in df.columns:
         series = df[column]

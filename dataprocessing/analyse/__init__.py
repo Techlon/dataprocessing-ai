@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
-from dataprocessing._defaults import DEFAULT_IQR_FACTOR, check_positive
+from dataprocessing._defaults import DEFAULT_IQR_FACTOR, check_positive as _check_positive
 
 
 from dataprocessing._columns import require_column as _require_column
@@ -132,7 +132,7 @@ def detect_outliers(df, columns=None, factor=DEFAULT_IQR_FACTOR):
     `factor` is the multiplier on the interquartile range. It shares a default
     with `clean.remove_outliers`, so what this reports is what that would drop.
     """
-    check_positive(factor)
+    _check_positive(factor)
     if columns is None:
         columns = _numeric_columns(df)
 

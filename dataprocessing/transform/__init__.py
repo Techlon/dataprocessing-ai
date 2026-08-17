@@ -10,7 +10,7 @@ _MERGE_HOWS = ('inner', 'left', 'right', 'outer', 'cross')
 _NUMERIC_AGGFUNCS = ('mean', 'sum', 'median', 'std', 'var', 'prod', 'sem', 'quantile')
 
 
-from dataprocessing._columns import not_found_message, require_column as _require_column, suggest
+from dataprocessing._columns import require_column as _require_column, suggest
 
 
 def _missing_message(missing, available, label="Column(s)", where=None, other_side=None):

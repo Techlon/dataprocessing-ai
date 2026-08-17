@@ -18,6 +18,15 @@ Built to be called by any AI agent via REST API, MCP server, or direct Python im
 
 ## Three ways to use it
 
+> **The REST API is built for localhost, not for the open internet.** It has no
+> authentication, no request size limit, and permits any origin. `/ingest`
+> accepts uploads and `/transform` evaluates column expressions, so anyone who
+> can reach the port can spend your memory and CPU. Run it bound to `127.0.0.1`,
+> or put authentication and a body-size limit in front of it before exposing it
+> anywhere. The MCP server is stdio-only and does not listen on a port, but
+> `ingest_file` reads any path the process can read — it inherits the trust you
+> give the client that launches it.
+
 ### 1. REST API (any AI, any language)
 
 Install with the API extra, then start the server:
@@ -198,6 +207,12 @@ from dataprocessing.verify import row_loss, dropped_columns, merge_result
 chart in `visualise` is computed over the non-null values of a column. In
 `summary_stats`, `count` is therefore the number of non-null values, and
 `null_count` reports how many were left out.
+
+**Cleaning converts text that is really numbers or dates.** A CSV read through
+`ingest` is typed by pandas already, but data arriving as JSON from another tool
+usually is not — quoted numbers stay text, and an analysis of text columns is
+empty. `/clean` and `clean_data` therefore run `fix_types` by default and report
+any values a conversion blanked. Pass `fix_types: false` to skip it.
 
 **Cleaning does not convert text to dates.** `fix_types` will convert a column to
 numeric or datetime only when at least 90% of its non-null values convert

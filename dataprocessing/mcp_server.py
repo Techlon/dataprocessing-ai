@@ -19,13 +19,14 @@ import base64
 
 from dataprocessing._defaults import (
     DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
+    DEFAULT_TYPE_THRESHOLD,
 )
 from dataprocessing import verify
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.ingest import read_file
 from dataprocessing.clean import (
-    drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
-    standardise_columns,
+    drop_nulls, fix_types as fix_types_fn, remove_duplicates,
+    remove_outliers as remove_outliers_iqr, standardise_columns,
 )
 from dataprocessing.transform import (
     filter_rows, select_columns, rename_columns,
@@ -74,6 +75,8 @@ def clean_data(
     row_null_threshold: float = DEFAULT_ROW_NULL_THRESHOLD,
     remove_dupes: bool = True,
     standardise_cols: bool = True,
+    fix_types: bool = True,
+    type_threshold: float = DEFAULT_TYPE_THRESHOLD,
     remove_outlier_rows: bool = False,
     outlier_factor: float = DEFAULT_IQR_FACTOR
 ) -> Dict[str, Any]:
@@ -87,6 +90,13 @@ def clean_data(
                         typically discards a quarter of a dataset with 5% of
                         cells missing. Raise it to keep patchy rows; 1.0 keeps
                         every row and drops only dead columns
+        fix_types: Convert text columns that are really numbers or dates.
+                   Leave this on: without it a dataset whose numbers arrived
+                   quoted stays text, and analyse_data then returns an empty
+                   report
+        type_threshold: Share of a column's values that must convert before the
+                   conversion is accepted (0.9). Raise toward 1.0 to leave a
+                   column as text unless every value converts
         remove_dupes: Whether to remove duplicate rows
         standardise_cols: Whether to lowercase and underscore column names
         remove_outlier_rows: Whether to drop rows holding an IQR outlier
@@ -118,6 +128,11 @@ def clean_data(
         f"more than {drop_null_threshold:.0%} of their values were null.",
         "Raise drop_null_threshold to keep them.",
     ))
+
+    if fix_types:
+        before_types = df.copy()
+        df = fix_types_fn(df, threshold=type_threshold)
+        warnings.extend(verify.type_changes(before_types, df))
 
     rows_before_dupes = len(df)
     if remove_dupes:

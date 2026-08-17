@@ -14,12 +14,13 @@ import json
 from dataprocessing import __version__
 from dataprocessing._defaults import (
     DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
+    DEFAULT_TYPE_THRESHOLD,
 )
 from dataprocessing import verify
 from dataprocessing._serialise import df_to_json, to_native
 from dataprocessing.clean import (
-    drop_nulls, remove_duplicates, remove_outliers as remove_outliers_iqr,
-    standardise_columns,
+    drop_nulls, fix_types as fix_types_fn, remove_duplicates,
+    remove_outliers as remove_outliers_iqr, standardise_columns,
 )
 from dataprocessing.transform import (
     filter_rows, select_columns, rename_columns,
@@ -65,6 +66,13 @@ class CleanRequest(BaseModel):
     # caller who wanted their column names left alone had no way to say so.
     remove_dupes: bool = True
     standardise_cols: bool = True
+    # Convert text columns that are really numbers or dates. Neither interface
+    # did this — only clean_all, which neither interface calls — so a dataset
+    # arriving with quoted numbers stayed text and /analyse then returned an
+    # empty report. Values that fail an accepted conversion become null, and
+    # the response says which and how many.
+    fix_types: bool = True
+    type_threshold: float = DEFAULT_TYPE_THRESHOLD
     remove_outliers: bool = False
     # The multiplier on the IQR that sets the outlier fence. Only consulted
     # when remove_outliers is true; 3.0 removes fewer rows than the 1.5 default.
@@ -158,6 +166,11 @@ def clean(req: CleanRequest):
             f"more than {req.drop_null_threshold:.0%} of their values were null.",
             "Raise drop_null_threshold to keep them.",
         ))
+
+        if req.fix_types:
+            before_types = df.copy()
+            df = fix_types_fn(df, threshold=req.type_threshold)
+            warnings.extend(verify.type_changes(before_types, df))
 
         rows_before_dupes = len(df)
         if req.remove_dupes:

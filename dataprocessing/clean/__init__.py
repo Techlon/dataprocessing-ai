@@ -6,7 +6,7 @@ from typing import Optional
 
 from dataprocessing._defaults import (
     DEFAULT_IQR_FACTOR, DEFAULT_NULL_THRESHOLD, DEFAULT_ROW_NULL_THRESHOLD,
-    DEFAULT_TYPE_THRESHOLD, check_positive, check_share,
+    DEFAULT_TYPE_THRESHOLD, check_positive as _check_positive, check_share as _check_share,
 )
 
 
@@ -36,8 +36,8 @@ def drop_nulls(df, threshold=DEFAULT_NULL_THRESHOLD,
 
     Returns a new frame; the caller's DataFrame is left untouched.
     """
-    check_share(threshold)
-    check_share(row_threshold, name="row_threshold")
+    _check_share(threshold)
+    _check_share(row_threshold, name="row_threshold")
 
     if subset is not None:
         missing = [c for c in subset if c not in df.columns]
@@ -69,7 +69,7 @@ def _try_convert(series, threshold=DEFAULT_TYPE_THRESHOLD):
     ordinary text column — names, cities, product codes — entirely into NaT and
     destroys the data silently. The guard is what makes a speculative parse safe.
     """
-    check_share(threshold)
+    _check_share(threshold)
     non_null = int(series.notna().sum())
     if non_null == 0:
         return None
@@ -113,7 +113,7 @@ def fix_types(df, threshold=DEFAULT_TYPE_THRESHOLD):
     Values that fail the accepted conversion become null, so a lower threshold
     trades data for usable types. That is the trade-off the number controls.
     """
-    check_share(threshold)
+    _check_share(threshold)
     df = df.copy()
     for col in df.columns:
         # Check bool BEFORE numeric: pandas treats bool as a numeric dtype, so
@@ -145,7 +145,7 @@ def remove_outliers(df, columns=None, method='iqr', factor=DEFAULT_IQR_FACTOR):
     """
     if method != 'iqr':
         raise ValueError(f"Unknown method: {method!r}. Only 'iqr' is supported.")
-    check_positive(factor)
+    _check_positive(factor)
 
     if columns is None:
         numeric_df = df.select_dtypes(include=[np.number])
