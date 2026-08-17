@@ -241,12 +241,65 @@ half of the stateful-session idea below that pays off without session state.
 
 ## Strategic direction
 
-The interesting gap in the ecosystem (per a 177k-MCP-tool study) is **reasoning/
-analytical tooling** — the smallest, slowest-growing category, with no natural
-incumbent. The strongest next direction is stateful multi-step analysis with
-verification (a session that holds data across operations and flags when a step
-did something suspicious). This attacks a documented agent failure mode and is a
-natural extension of the existing modules.
+Read the trial result below before planning work. It refutes part of what this
+section used to claim, and it should change what gets built next.
+
+### What was measured (17 Aug 2026)
+
+The same join task was put to Claude Desktop twice, against the same messy CSVs,
+with every MCP call logged by a proxy so tool use was measured rather than
+inferred from the prose. The two prompts differed by one clause.
+
+| | Tool calls | Outcome |
+|---|---|---|
+| "Join X to Y and tell me…" | **0** | Wrote its own pandas. Correct, well-caveated answer. |
+| "**Using the dataprocessing tools**, join X to Y…" | **3** | Used the tools, and quoted a warning back to the user. |
+
+Two separate findings, with different answers:
+
+**Warnings work.** In the second run the model reproduced the merge warning's
+figures verbatim — "the tool flagged this: 103 rows returned from 122 on the
+left" — attributed it to the tool, and built its reasoning about the 20 missing
+customers on it. This was the open question behind everything in 0.3.0, and the
+answer is yes: when the tools run, an agent reads the warnings and acts on them.
+
+**But the tools are not reached for unprompted.** Given a shell and a Python
+interpreter, the model used them instead. The bottleneck is invocation, not
+comprehension.
+
+### What that means for the pitch
+
+The old claim here — that an agent writing raw pandas is unreliable and a library
+of defined operations is safer — did not survive. Unprompted, the model's own
+code was correct, and its answer was *better* than the library alone would have
+given: it found a conflicting duplicate record, framed the count as a convention
+decision, and flagged an unrelated sentinel value.
+
+The claim that did survive is narrower: **when the tools are in the path, they
+make an agent notice things it would otherwise have to think to check.** That is
+demonstrated. It requires them to be in the path, which means the users who
+benefit are the ones with no alternative — MCP clients without a sandbox, hosted
+assistants with tool calling but no interpreter, pipelines where arbitrary code
+execution is the thing being avoided. Smaller than "AI agents doing data work",
+and honest.
+
+### What to do with that
+
+Do not build more warnings. The marginal warning is worth much less than getting
+the tools invoked at all.
+
+The stateful session module (per the 177k-MCP-tool study, reasoning/analytical
+tooling is the smallest and slowest-growing category, with no incumbent) is still
+the most interesting technical direction, and it inherits this finding exactly:
+it will help when invoked and go unused by an agent that can write code. Settle
+the positioning question before building it, or it is a larger version of the
+same leverage problem.
+
+The trial harness is kept outside the repo, at
+`~/Projects/dataprocessing-trial-harness/` with data in
+`~/Projects/dataprocessing-trial/`. Keep the protocol out of the data directory:
+the first run was contaminated because the answer key sat beside the CSVs and the
+model read it.
 
 Treat monetisation as open. MIT-licensed and open-source-first is settled; a
 hosted API is the eventual path, not a near-term one.
