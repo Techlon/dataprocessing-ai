@@ -18,7 +18,8 @@ competing head-on with pandas.
 - GitHub: `Techlon/dataprocessing-ai`
 - Package name (PyPI): `dataprocessing-ai`
 - Import name (Python): `dataprocessing`  (these intentionally differ)
-- Current published version: 0.2.0 (0.3.0 prepared, see CHANGELOG.md)
+- Current published version: 0.4.0. NOTE: 0.3.0 shipped with a false-alarm bug
+  (group-by reported as row loss); it was tagged mid-stream, five commits behind.
 - CI: `.github/workflows/ci.yml`. Release: tag `vX.Y.Z`, see `RELEASING.md`
 - Supported: Python 3.10-3.13, pandas 2.2-3.x, mcp 1.x and 2.x (all in CI)
 

@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.3.0
+## 0.4.0
+
+Everything below was written before 0.3.0 was tagged but landed after it, so it
+missed that release. 0.3.0 shipped the warnings layer with a defect in it —
+`group_and_aggregate` reported collapsing 120 rows to 5 as a "98% row loss",
+which is a description of grouping rather than a finding. A warning that fires
+on correct behaviour teaches the reader to skip warnings, so that one bug
+undercut the whole feature. Upgrade from 0.3.0.
 
 ### Found by using the tools, not by testing them
 
@@ -8,11 +15,8 @@ A realistic CRM export — trailing spaces in headers, blank cells, duplicate
 rows, numbers stored as text, one absurd value — driven through the MCP tools
 the way an agent would. Three problems the 209-test suite did not catch:
 
-- **Grouping no longer reports a false alarm.** `group_and_aggregate` collapsing
-  120 rows to 5 was warned about as a 96% row loss. Collapsing rows *is*
-  grouping, so the warning fired on correct behaviour — exactly the noise that
-  teaches a reader to skip warnings, undoing the point of having them. Reshaping
-  operations are now exempt, a normal filter is quiet, and a filter matching
+- **Grouping no longer reports a false alarm.** Reshaping operations are exempt
+  from row-loss warnings, a normal filter is quiet, and a filter matching
   nothing or almost nothing still warns.
 - **A column name that no longer exists suggests the one that does.** `clean`
   standardises names, so the most likely mistake in any pipeline is using a name
@@ -25,19 +29,39 @@ the way an agent would. Three problems the 209-test suite did not catch:
 
 ### Added
 
-- **`analyse` and `visualise` warn too.** A second pass over a weekly metrics
-  table found the biggest hole in the idea: `analyse` is where an agent forms
-  conclusions, and it flagged nothing at all. It reported a mean for a column
-  computed from 4 of 60 values, a correlation of exactly 1.000 between a column
-  and one derived from it, statistics for an account-number column as though it
-  were a measurement, and a constant column with undefined variance — all
-  without comment. Each of those now says so. Charts drawn from a mostly-null
-  column, from too few points to read a trend, or with a single category say so
-  in `usermeta.warnings`, which is Vega-Lite's own metadata slot, so the spec
-  stays valid and renderable rather than being wrapped in an envelope.
+- **`analyse` and `visualise` warn too.** `analyse` is where an agent forms
+  conclusions and it flagged nothing at all: a mean computed from 4 of 60
+  values, a correlation of exactly 1.000 between a column and one derived from
+  it, statistics for an account-number column as though it were a measurement,
+  a constant column with undefined variance. Each now says so. Charts drawn from
+  a mostly-null column, from too few points to read a trend, or with a single
+  category say so in `usermeta.warnings` — Vega-Lite's own metadata slot, so the
+  spec stays valid and renderable.
 
-  Checked for noise as well as for signal: a healthy six-step pipeline produces
-  zero warnings across all six tools.
+- **Cleaning reports outliers it left in place.** It does not remove them by
+  default and said nothing about them, so one mistyped `999999` moved a mean
+  from 196 to 9453 in silence. Keyed to the distortion rather than to the fence:
+  it reports only when excluding the outliers would move the mean by 10% or
+  more, and says by how much. In any normal sample a few points sit beyond the
+  IQR fence, so warning on the fence alone fired on healthy data.
+
+- **A left join reports unmatched rows.** The row count is unchanged by a left
+  join, so nothing else in the response reveals that a chunk of the result is
+  null on one side.
+
+  Checked for noise as well as signal throughout: a healthy six-step pipeline
+  produces zero warnings across all six tools.
+
+### Trial result
+
+The MCP tools were put to Claude Desktop twice on the same task, with every call
+logged. Unprompted, the model wrote its own pandas and called nothing. Told to
+use the tools, it called three — and quoted a warning back to the user verbatim,
+crediting the tool. So warnings are read and acted on when the tools run, but
+the tools are not reached for unprompted by an agent that can write code. See
+CLAUDE.md for what that implies.
+
+## 0.3.0
 
 - **Operations now say when they did something surprising.** `/clean`,
   `/transform` and `/merge`, and the matching MCP tools, return a `warnings`
