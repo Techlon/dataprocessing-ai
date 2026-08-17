@@ -1375,3 +1375,134 @@ def test_null_row_warning_reads_naturally_at_the_default():
     body = client.post("/clean", json={"data": rows}).json()
     assert body["columns"] == ["a", "b"]
     assert any("any null at all" in w for w in body["warnings"])
+
+
+# ===========================================================================
+# analyse and visualise warnings — the second dogfooding round
+# ===========================================================================
+# analyse is where an agent forms conclusions, so a misleading number there
+# travels further than anywhere else. It had no warnings at all.
+
+@pytest.fixture
+def trap_frame():
+    """A weekly metrics table carrying the traps real tables carry."""
+    rng = np.random.default_rng(3)
+    n = 60
+    df = pd.DataFrame({
+        "signups": rng.integers(50, 200, n),
+        "currency": "GBP",                              # constant
+        "account_id": rng.integers(10**6, 10**7, n),    # identifier
+        "nps": [None] * (n - 4) + [7.0, 8.0, 9.0, 6.0],  # 93% null
+    })
+    df["revenue"] = df["signups"] * 12.5                # derived from signups
+    return df
+
+
+def test_analysis_warns_about_a_sparse_column(trap_frame):
+    warnings = verify.analysis(trap_frame)
+    assert any("'nps'" in w and "4 of 60" in w for w in warnings)
+
+
+def test_analysis_warns_about_a_derived_correlation(trap_frame):
+    # revenue = signups * 12.5. Reporting r=1.0 as a finding is announcing a
+    # tautology as an insight.
+    warnings = verify.analysis(trap_frame)
+    assert any("derived from the other" in w for w in warnings)
+
+
+def test_analysis_warns_about_a_constant_column(trap_frame):
+    assert any("single distinct value" in w for w in verify.analysis(trap_frame))
+
+
+def test_analysis_warns_about_an_identifier_column(trap_frame):
+    assert any("'account_id'" in w and "identifier" in w for w in verify.analysis(trap_frame))
+
+
+def test_analysis_warns_about_an_all_null_column():
+    df = pd.DataFrame({"a": [1.0, 2.0], "dead": [None, None]})
+    assert any("entirely null" in w for w in verify.analysis(df))
+
+
+def test_analysis_warns_about_an_empty_dataset():
+    assert verify.analysis(pd.DataFrame({"a": []})) == [
+        "The dataset is empty, so every statistic below is undefined."
+    ]
+
+
+def test_analysis_is_quiet_on_ordinary_data():
+    # The noise test. Warnings that fire on healthy data are worse than none.
+    rng = np.random.default_rng(1)
+    df = pd.DataFrame({
+        "signups": rng.integers(50, 200, 60),
+        "revenue": rng.normal(1000, 200, 60),
+        "region": rng.choice(["north", "south"], 60),
+    })
+    assert verify.analysis(df) == []
+
+
+def test_small_integer_column_is_not_called_an_identifier():
+    # Twenty distinct integers is a plausible measurement, not an ID.
+    df = pd.DataFrame({"n": list(range(15))})
+    assert not any("identifier" in w for w in verify.analysis(df))
+
+
+def test_chart_warns_about_a_thin_plot():
+    df = pd.DataFrame({"x": [1.0, 2.0], "y": [1.0, 2.0]})
+    assert any("too few" in w for w in verify.chart("scatter", df, {"y": "y"}, 2))
+
+
+def test_chart_warns_about_a_single_bar():
+    df = pd.DataFrame({"c": ["GBP"] * 10})
+    assert any("single bar" in w for w in verify.chart("bar_chart", df, {"column": "c"}, 1))
+
+
+def test_chart_is_quiet_on_an_ordinary_plot():
+    df = pd.DataFrame({"x": range(50), "y": range(50)})
+    assert verify.chart("scatter", df, {"x": "x", "y": "y"}, 50) == []
+
+
+def test_analyse_endpoint_returns_warnings(trap_frame):
+    rows = json.loads(trap_frame.where(trap_frame.notna(), None).to_json(orient="records"))
+    body = client.post("/analyse", json={"data": rows}).json()
+    assert any("derived from the other" in w for w in body["warnings"])
+    # The existing report shape is untouched.
+    assert {"summary_stats", "correlation_matrix", "missing_values", "outliers"} <= set(body)
+
+
+def test_full_report_itself_gains_no_warnings_key(trap_frame):
+    # Warnings are an interface concern; the Python function keeps its shape.
+    assert "warnings" not in full_report(trap_frame)
+
+
+def test_visualise_warnings_ride_in_usermeta():
+    # usermeta is Vega-Lite's own metadata slot, so the spec stays renderable
+    # rather than being wrapped in an envelope every consumer must unpack.
+    rows = [{"nps": None}] * 56 + [{"nps": float(v)} for v in (7, 8, 9, 6)]
+    spec = client.post("/visualise", json={
+        "data": rows, "chart": "histogram", "params": {"column": "nps", "bins": 5},
+    }).json()
+    assert spec["$schema"].endswith("v5.json") and spec["mark"] == "bar"
+    assert any("93% null" in w for w in spec["usermeta"]["warnings"])
+
+
+def test_visualise_adds_no_usermeta_when_all_is_well():
+    rows = [{"x": float(i), "y": float(i)} for i in range(50)]
+    spec = client.post("/visualise", json={
+        "data": rows, "chart": "scatter", "params": {"x": "x", "y": "y"},
+    }).json()
+    assert "usermeta" not in spec
+
+
+async def test_mcp_analyse_data_returns_warnings(trap_frame):
+    from dataprocessing import mcp_server
+
+    rows = json.loads(trap_frame.where(trap_frame.notna(), None).to_json(orient="records"))
+    payload = tool_result(await mcp_server.mcp.call_tool("analyse_data", {"data": rows}))
+    assert any("identifier" in w for w in payload["warnings"])
+
+
+async def test_mcp_analyse_description_tells_the_agent_to_read_warnings():
+    from dataprocessing import mcp_server
+
+    tools = {t.name: t.description for t in await mcp_server.mcp.list_tools()}
+    assert "READ THE WARNINGS" in tools["analyse_data"]

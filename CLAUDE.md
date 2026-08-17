@@ -36,7 +36,7 @@ dataprocessing/
   _serialise.py to_native + df_to_json, shared by BOTH interfaces (core deps only)
   api.py        FastAPI app (all five modules as endpoints)
   mcp_server.py MCP server (all five modules as tools)
-tests/          pytest suite — 226 tests, must stay green
+tests/          pytest suite — 243 tests, must stay green
 pyproject.toml  package config; dependencies split into extras
 ```
 
@@ -158,7 +158,8 @@ run, and keep the review/verification role.
 ## Dogfooding
 
 Run a realistic messy dataset through the MCP tools before believing a feature
-is done. The warnings layer passed 209 tests and was still wrong in ways only
+is done, and check for NOISE as well as signal — a warning that fires on healthy
+data is worse than no warning, because it teaches the reader to skip all of them. The warnings layer passed 209 tests and was still wrong in ways only
 visible from the output: a false alarm on every group-by, and a join between a
 cleaned and an uncleaned frame with no way through. Tests check what you thought
 to check; using the thing shows what you did not.
@@ -167,7 +168,7 @@ to check; using the thing shows what you did not.
 
 ```bash
 pip install -e ".[dev]"    # install with all dev + runtime deps
-pytest -q                  # expect: 226 passed
+pytest -q                  # expect: 243 passed
 ```
 
 One harmless warning is expected (a Starlette/httpx deprecation). Do not "fix"

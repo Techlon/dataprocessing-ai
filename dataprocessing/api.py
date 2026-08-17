@@ -269,7 +269,11 @@ def merge(req: MergeRequest):
 def analyse(req: AnalyseRequest):
     try:
         df = pd.DataFrame(req.data)
-        return to_native(full_report(df))
+        report = full_report(df)
+        # full_report itself stays pure — the warnings are an interface concern,
+        # added here so the Python API keeps its existing shape.
+        report["warnings"] = verify.analysis(df)
+        return to_native(report)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -297,6 +301,13 @@ def visualise(req: VisualiseRequest):
                 detail=f"Unknown chart: {req.chart}. Valid: {list(charts.keys())}",
             )
         result = charts[req.chart](df, **req.params)
+        chart_warnings = verify.chart(
+            req.chart, df, req.params, len(result["data"]["values"]))
+        if chart_warnings:
+            # usermeta is Vega-Lite's own slot for application metadata, so the
+            # spec stays valid and renderable rather than being wrapped in an
+            # envelope that every consumer would have to unpack.
+            result.setdefault("usermeta", {})["warnings"] = chart_warnings
         return to_native(result)
     except HTTPException:
         raise

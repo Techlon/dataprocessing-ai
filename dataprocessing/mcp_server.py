@@ -264,13 +264,19 @@ def analyse_data(data: List[Dict[str, Any]]) -> Dict[str, Any]:
         data: List of row dicts
     Returns:
         Dict containing: summary_stats, correlation_matrix, missing_values,
-        and outliers
+        outliers, and warnings.
+
+        READ THE WARNINGS before drawing conclusions. They flag statistics that
+        rest on very few values, columns that are really identifiers, and
+        correlations so perfect that one column is derived from the other.
     """
     df = pd.DataFrame(data)
+    report = full_report(df)
+    report["warnings"] = verify.analysis(df)
     # to_native is essential here, not cosmetic: full_report returns numpy
     # int64/float64, which MCP cannot serialise, and this tool failed outright
     # for every input until it was applied.
-    return to_native(full_report(df))
+    return to_native(report)
 
 @mcp.tool()
 def visualise_data(data: List[Dict[str, Any]], chart: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -288,7 +294,10 @@ def visualise_data(data: List[Dict[str, Any]], chart: str, params: Dict[str, Any
             - correlation_heatmap: {'columns': List[str] (optional)}
 
     Returns:
-        Dict[str, Any]: A JSON-serializable Vega-Lite spec dict representing the chart.
+        Dict[str, Any]: A JSON-serializable Vega-Lite spec. If anything about
+        the chart would mislead — too few points to read a trend, a mostly-null
+        column, a single category — the spec carries usermeta.warnings saying
+        so. Check it before describing what the chart shows.
     """
     df = pd.DataFrame(data)
     charts = {
@@ -302,7 +311,12 @@ def visualise_data(data: List[Dict[str, Any]], chart: str, params: Dict[str, Any
     if chart not in charts:
         raise ValueError(f"Unknown chart: {chart}. Valid: {list(charts.keys())}")
 
-    return to_native(charts[chart](df, **params))
+    spec = charts[chart](df, **params)
+    chart_warnings = verify.chart(chart, df, params, len(spec["data"]["values"]))
+    if chart_warnings:
+        # usermeta is Vega-Lite's own metadata slot, so the spec stays valid.
+        spec.setdefault("usermeta", {})["warnings"] = chart_warnings
+    return to_native(spec)
 
 def main():
     mcp.run()

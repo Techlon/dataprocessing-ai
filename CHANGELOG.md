@@ -25,6 +25,20 @@ the way an agent would. Three problems the 209-test suite did not catch:
 
 ### Added
 
+- **`analyse` and `visualise` warn too.** A second pass over a weekly metrics
+  table found the biggest hole in the idea: `analyse` is where an agent forms
+  conclusions, and it flagged nothing at all. It reported a mean for a column
+  computed from 4 of 60 values, a correlation of exactly 1.000 between a column
+  and one derived from it, statistics for an account-number column as though it
+  were a measurement, and a constant column with undefined variance — all
+  without comment. Each of those now says so. Charts drawn from a mostly-null
+  column, from too few points to read a trend, or with a single category say so
+  in `usermeta.warnings`, which is Vega-Lite's own metadata slot, so the spec
+  stays valid and renderable rather than being wrapped in an envelope.
+
+  Checked for noise as well as for signal: a healthy six-step pipeline produces
+  zero warnings across all six tools.
+
 - **Operations now say when they did something surprising.** `/clean`,
   `/transform` and `/merge`, and the matching MCP tools, return a `warnings`
   list alongside the data.
