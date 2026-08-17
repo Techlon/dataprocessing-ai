@@ -277,6 +277,26 @@ answer is yes: when the tools run, an agent reads the warnings and acts on them.
 interpreter, the model used them instead. The bottleneck is invocation, not
 comprehension.
 
+### Who it is for (settled, 17 Aug 2026)
+
+Other AI models, using it to do their own data work. Not humans writing Python,
+not a hosted product — tools an agent calls. That is the goal, and it is what
+makes the trial result below the central problem rather than a curiosity: the
+trial measured exactly this user, on exactly this kind of task, and the tools
+went unused.
+
+The work is therefore not "more capability". It is making an agent *prefer*
+these tools to writing four lines of pandas. Two levers exist, and only one has
+been tried:
+
+1. **What the model reads before it chooses.** Tool descriptions are the only
+   thing in context at the moment of decision, and ours describe what each tool
+   does — clean, transform, merge — not why it beats the obvious alternative.
+   Untested, and cheap to test with the trial harness.
+2. **Doing something pandas-in-context cannot.** Holding data server-side behind
+   a handle lifts the ~10k-row ceiling. Expensive, and only helps agents that
+   cannot run code anyway.
+
 ### What that means for the pitch
 
 The old claim here — that an agent writing raw pandas is unreliable and a library
