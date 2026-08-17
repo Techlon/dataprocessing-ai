@@ -97,7 +97,7 @@ def dropped_columns(columns_in, columns_out, cause, remedy=None):
     return f"{message} {remedy}" if remedy else message
 
 
-def merge_result(left_rows, right_rows, result_rows, how="inner"):
+def merge_result(left_rows, right_rows, result_rows, how="inner", unmatched=None):
     """Warn about a join whose shape is not what the caller probably expected.
 
     A join fails by multiplying rather than by erroring, which is why this
@@ -126,7 +126,76 @@ def merge_result(left_rows, right_rows, result_rows, how="inner"):
             f"left: rows without a match in the right frame are dropped. Use "
             f"how='left' to keep them."
         )
+
+    if how in {"left", "outer"} and unmatched:
+        # A left join keeps unmatched rows and fills their right-hand columns
+        # with nulls. The row count is unchanged, so nothing about the response
+        # reveals that a chunk of the result is empty on one side.
+        warnings.append(
+            f"{unmatched} of {left_rows} left rows found no match, so their "
+            f"columns from the right frame are null. Counts and averages over "
+            f"those columns will be computed from {left_rows - unmatched} rows, "
+            f"not {left_rows}."
+        )
     return warnings
+
+
+def extreme_values(df, factor=None, columns=None):
+    """Warn about outliers left in place, without removing them.
+
+    Cleaning does not drop outliers by default, and said nothing about them, so
+    a single mistyped 999999 in an order-value column moved the mean from 196
+    to 9453 with no indication anything was wrong. Removing the row is a
+    judgement only the caller can make; mentioning it is not.
+    """
+    from dataprocessing._defaults import DEFAULT_IQR_FACTOR
+    from dataprocessing.analyse import detect_outliers
+
+    factor = DEFAULT_IQR_FACTOR if factor is None else factor
+    warnings = []
+    for column, positions in detect_outliers(df, columns=columns, factor=factor).items():
+        if not positions:
+            continue
+        series = df[column].dropna()
+        extreme = series.loc[[p for p in positions if p in series.index]]
+        if extreme.empty:
+            continue
+
+        # Being beyond the fence is not itself worth reporting: in any normal
+        # sample a few points always are, so warning on that fires constantly on
+        # healthy data. What matters is whether they actually distort the
+        # answer, so the test is how far the mean moves without them.
+        without = series.drop(extreme.index)
+        if without.empty or series.mean() == 0:
+            continue
+        shift = abs(series.mean() - without.mean()) / abs(series.mean())
+        if shift < MEAN_DISTORTION_SHARE:
+            continue
+
+        worst = extreme.max() if abs(extreme.max()) > abs(extreme.min()) else extreme.min()
+        warnings.append(
+            f"Column {column!r} holds {len(positions)} value(s) beyond {factor} x "
+            f"the interquartile range — the most extreme is {worst:g} against a "
+            f"median of {series.median():g}. They were left in place, and they "
+            f"move the mean of this column by {shift:.0%} "
+            f"({series.mean():.2f} with them, {without.mean():.2f} without). "
+            f"Set remove_outliers to drop those rows, or check them for "
+            f"data-entry errors."
+        )
+    return warnings
+
+
+def unmatched_rows(left, right, left_keys, right_keys):
+    """Count left rows whose key has no match on the right."""
+    def keyed(frame, keys):
+        if len(keys) == 1:
+            return frame[keys[0]]
+        return frame[list(keys)].apply(tuple, axis=1)
+
+    try:
+        return int((~keyed(left, left_keys).isin(set(keyed(right, right_keys)))).sum())
+    except Exception:
+        return 0
 
 
 def type_changes(before, after):
@@ -160,6 +229,10 @@ SPARSE_COLUMN_SHARE = 0.50
 # column derived from another — revenue = signups * price — and reporting them
 # as findings invites an agent to announce a tautology as an insight.
 DERIVED_CORRELATION = 0.999
+
+# How far outliers must move a column's mean before they are worth reporting.
+# Points beyond the IQR fence are ordinary in any real sample; distortion is not.
+MEAN_DISTORTION_SHARE = 0.10
 
 # Below this many points a chart implies a pattern it cannot support.
 THIN_CHART_POINTS = 5

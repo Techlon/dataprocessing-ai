@@ -41,6 +41,12 @@ app.add_middleware(
 )
 
 
+def _as_keys(value):
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
 def _null_row_cause(threshold):
     """Phrase the row-null rule the way it actually behaves at its default."""
     if threshold <= 0:
@@ -172,6 +178,10 @@ def clean(req: CleanRequest):
                 "Raise outlier_factor to keep more, or set remove_outliers to "
                 "false — an extreme value is sometimes the observation that matters.",
             ))
+        # Outliers are not removed by default, and saying nothing about them let a
+        # single mistyped value move a mean by a factor of fifty.
+        if not req.remove_outliers:
+            warnings.extend(verify.extreme_values(df, factor=req.outlier_factor))
         if req.standardise_cols:
             df = standardise_columns(df)
         # Per-stage warnings each carry a specific remedy, but each is judged
@@ -258,7 +268,11 @@ def merge(req: MergeRequest):
             "left_rows": len(left),
             "right_rows": len(right),
             "warnings": verify.merge_result(
-                len(left), len(right), len(result), how=req.how),
+                len(left), len(right), len(result), how=req.how,
+                unmatched=verify.unmatched_rows(
+                    left, right,
+                    _as_keys(req.left_on or req.on), _as_keys(req.right_on or req.on))
+                if req.how in ("left", "outer") else None),
         }
     except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))

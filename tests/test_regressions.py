@@ -1506,3 +1506,87 @@ async def test_mcp_analyse_description_tells_the_agent_to_read_warnings():
 
     tools = {t.name: t.description for t in await mcp_server.mcp.list_tools()}
     assert "READ THE WARNINGS" in tools["analyse_data"]
+
+
+# ===========================================================================
+# Found in the pre-flight for the Claude Desktop trial
+# ===========================================================================
+# Both traps in the trial produced no warning at all, which would have made the
+# test blame the model for a gap in the library.
+
+def test_cleaning_reports_outliers_it_left_in_place():
+    # Cleaning does not remove outliers by default and said nothing about them,
+    # so one mistyped 999999 moved the mean from 196 to 9453 in silence.
+    rows = [{"order_value": float(v)} for v in range(100, 300)]
+    rows.append({"order_value": 999999.0})
+    body = client.post("/clean", json={"data": rows}).json()
+    warning = next(w for w in body["warnings"] if "999999" in w)
+    assert "left in place" in warning
+    # Keyed to the distortion, not to the fence: it must say how far the mean
+    # moves, which is the reason the caller should care.
+    assert "move the mean" in warning and "96%" in warning
+
+
+def test_no_outlier_warning_when_they_are_removed():
+    # Saying "left in place" after removing them would be false and noisy.
+    rows = [{"v": float(i)} for i in range(100)] + [{"v": 99999.0}]
+    body = client.post("/clean", json={"data": rows, "remove_outliers": True}).json()
+    assert not any("left in place" in w for w in body["warnings"])
+
+
+def test_no_outlier_warning_on_ordinary_data():
+    rows = [{"v": float(i)} for i in range(100)]
+    assert client.post("/clean", json={"data": rows}).json()["warnings"] == []
+
+
+def test_no_outlier_warning_for_a_normal_sample():
+    # The regression this rule exists for: in any normal sample a few points
+    # fall beyond 1.5 x IQR, so warning on the fence alone fired on healthy
+    # data — the exact noise the whole feature is meant to avoid.
+    # Continuous values, so the deduplication step has nothing to say and this
+    # test measures only the outlier rule.
+    rng = np.random.default_rng(11)
+    rows = [{"signups": float(v)} for v in rng.normal(120, 25, 300)]
+    assert client.post("/clean", json={"data": rows}).json()["warnings"] == []
+
+
+def test_left_join_reports_unmatched_rows():
+    # The row count is unchanged by a left join, so nothing else in the
+    # response reveals that a third of the result is null on one side.
+    left = [{"k": i} for i in range(10)]
+    right = [{"k": i, "label": "x"} for i in range(6)]
+    body = client.post("/merge", json={
+        "left": left, "right": right, "on": "k", "how": "left"}).json()
+    assert body["rows"] == 10
+    assert any("4 of 10 left rows found no match" in w for w in body["warnings"])
+
+
+def test_inner_join_does_not_get_the_unmatched_warning():
+    # An inner join drops them, which its own warning already covers.
+    left = [{"k": i} for i in range(10)]
+    right = [{"k": i, "label": "x"} for i in range(6)]
+    body = client.post("/merge", json={
+        "left": left, "right": right, "on": "k", "how": "inner"}).json()
+    assert not any("found no match" in w for w in body["warnings"])
+
+
+def test_fully_matched_left_join_is_quiet():
+    rows = [{"k": i} for i in range(5)]
+    body = client.post("/merge", json={
+        "left": rows, "right": [{"k": i, "l": "x"} for i in range(5)],
+        "on": "k", "how": "left"}).json()
+    assert body["warnings"] == []
+
+
+def test_unmatched_rows_handles_a_composite_key():
+    left = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+    right = pd.DataFrame({"a": [1], "b": ["x"]})
+    assert verify.unmatched_rows(left, right, ["a", "b"], ["a", "b"]) == 1
+
+
+async def test_mcp_clean_data_reports_retained_outliers():
+    from dataprocessing import mcp_server
+
+    rows = [{"v": float(i)} for i in range(200)] + [{"v": 999999.0}]
+    payload = tool_result(await mcp_server.mcp.call_tool("clean_data", {"data": rows}))
+    assert any("999999" in w for w in payload["warnings"])

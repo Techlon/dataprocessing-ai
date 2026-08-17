@@ -37,6 +37,12 @@ from dataprocessing.visualise import (
     histogram, bar_chart, scatter, line_chart, correlation_heatmap)
 
 
+def _as_keys(value):
+    if value is None:
+        return []
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
 def _null_row_cause(threshold):
     """Phrase the row-null rule the way it actually behaves at its default."""
     if threshold <= 0:
@@ -129,6 +135,10 @@ def clean_data(
             f"rows beyond {outlier_factor} x the interquartile range were removed.",
             "Raise outlier_factor to keep more, or set remove_outlier_rows to false.",
         ))
+    # Outliers are not removed by default, and saying nothing about them let a
+    # single mistyped value move a mean by a factor of fifty.
+    if not remove_outlier_rows:
+        warnings.extend(verify.extreme_values(df, factor=outlier_factor))
     if standardise_cols:
         df = standardise_columns(df)
     # Several small losses can compound past the threshold while no single
@@ -253,7 +263,11 @@ def merge_data(
         "left_rows": len(left_df),
         "right_rows": len(right_df),
         "warnings": verify.merge_result(
-            len(left_df), len(right_df), len(result), how=how),
+            len(left_df), len(right_df), len(result), how=how,
+            unmatched=verify.unmatched_rows(
+                left_df, right_df,
+                _as_keys(left_on or on), _as_keys(right_on or on))
+            if how in ("left", "outer") else None),
     }
 
 @mcp.tool()
